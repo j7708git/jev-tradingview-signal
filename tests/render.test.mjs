@@ -88,8 +88,42 @@ test('trendLevel：用答案附的 legend 映射（數字索引 / 字串級名�
   assert.equal(trendLevel({ score: 'strong', legend }), 'strong');
   assert.equal(trendLevel({ score: 'moderate' }), 'moderate');
   assert.equal(trendLevel({}), '—');
-  // 渲染字串也帶級名
-  assert.match(renderTrend({ score: 2, legend }), /moderate/);
+  // 渲染字串也帶級名（相容：舊 trend_strength 包成答案層）
+  assert.match(renderTrend({ trend_strength: { score: 2, legend } }), /moderate/);
+});
+
+test('09h 趨勢兩題：bull_trend/bear_trend 渲染兩列（多頭／空頭趨勢強度）', () => {
+  const legend = ['none', 'weak', 'moderate', 'strong', 'very strong'];
+  const html = renderTrend({
+    bull_trend: { score: 2, legend },
+    bear_trend: { score: 0, legend },
+  });
+  assert.match(html, /多頭趨勢強度/);
+  assert.match(html, /空頭趨勢強度/);
+  assert.match(html, /moderate/);
+  assert.match(html, /none/);
+  assert.equal((html.match(/class="trend"/g) || []).length, 2);
+});
+
+test('09h 趨勢兩題：缺 bear_trend 不拋錯，該列顯示「—」', () => {
+  const legend = ['none', 'weak', 'moderate', 'strong', 'very strong'];
+  let html = '';
+  assert.doesNotThrow(() => {
+    html = renderTrend({ bull_trend: { score: 3, legend } });
+  });
+  assert.match(html, /多頭趨勢強度/);
+  assert.match(html, /空頭趨勢強度/);
+  assert.match(html, /—/);
+});
+
+test('09h 相容：回應含舊 trend_strength 時渲染單列「趨勢強度」', () => {
+  const html = renderTrend({
+    trend_strength: { score: 'moderate', legend: ['none', 'weak', 'moderate'] },
+  });
+  assert.match(html, /趨勢強度/);
+  assert.doesNotMatch(html, /多頭趨勢強度/);
+  assert.doesNotMatch(html, /空頭趨勢強度/);
+  assert.equal((html.match(/class="trend"/g) || []).length, 1);
 });
 
 test('up_10_bars.noul → 未來 10 根上漲機率：NN%', () => {
@@ -133,13 +167,16 @@ test('renderResult：done 版型含 JSON 折疊與免責固定語', () => {
     answers: {
       direction: { choice: 'short', probabilities: { long: 0.1, neutral: 0.2, short: 0.7 }, confidence: 0.7 },
       up_10_bars: { noul: 0.3 },
-      trend_strength: { score: 'weak', legend: ['none', 'weak'], confidence: 0.4 },
+      bull_trend: { score: 'weak', legend: ['none', 'weak'], confidence: 0.4 },
+      bear_trend: { score: 'none', legend: ['none', 'weak'], confidence: 0.6 },
     },
     usage: { input_tokens: 500, output_tokens: 10 },
     ms: 321,
   };
   const html = renderResult(last, { model: 'jev-latest' });
   assert.match(html, /dir-short/);
+  assert.match(html, /多頭趨勢強度/);
+  assert.match(html, /空頭趨勢強度/);
   assert.match(html, /原始 payload/);
   assert.match(html, /原始回應/);
   assert.ok(html.includes(DISCLAIMER));

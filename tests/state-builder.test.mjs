@@ -36,30 +36,39 @@ const snapshot = (bars = BARS) => ({
 // QUESTIONS 常數（§4.4 逐字）
 // ─────────────────────────────────────────────────────────────
 
-test('QUESTIONS: 三題 id 與 type 正確', () => {
+test('QUESTIONS: 四題 id 與 type 正確（trend_strength 已由 bull/bear 取代）', () => {
   assert.deepEqual(Object.keys(QUESTIONS), [
     'direction',
     'up_10_bars',
-    'trend_strength',
+    'bull_trend',
+    'bear_trend',
   ]);
   assert.equal(QUESTIONS.direction.type, 'choice');
   assert.equal(QUESTIONS.up_10_bars.type, 'noul');
-  assert.equal(QUESTIONS.trend_strength.type, 'score');
+  assert.equal(QUESTIONS.bull_trend.type, 'score');
+  assert.equal(QUESTIONS.bear_trend.type, 'score');
+  assert.equal('trend_strength' in QUESTIONS, false);
 });
 
-test('QUESTIONS: direction criteria ⊇ long/neutral/short；trend_strength 五級', () => {
+test('QUESTIONS: bull_trend/bear_trend 五級且題字逐字對齊 §4.4', () => {
   const keys = Object.keys(QUESTIONS.direction.criteria);
   for (const k of ['long', 'neutral', 'short']) {
     assert.ok(keys.includes(k), `direction.criteria 應含 ${k}`);
   }
-  assert.equal(QUESTIONS.trend_strength.criteria.length, 5);
-  assert.deepEqual(QUESTIONS.trend_strength.criteria, [
-    'none',
-    'weak',
-    'moderate',
-    'strong',
-    'very strong',
-  ]);
+  const LEVELS = ['none', 'weak', 'moderate', 'strong', 'very strong'];
+  for (const id of ['bull_trend', 'bear_trend']) {
+    assert.equal(QUESTIONS[id].type, 'score');
+    assert.equal(QUESTIONS[id].criteria.length, 5);
+    assert.deepEqual(QUESTIONS[id].criteria, LEVELS);
+  }
+  assert.equal(
+    QUESTIONS.bull_trend.instructions,
+    'How strong is the bullish (upward) pressure in this series right now, judged from the recent candles and the derived features?',
+  );
+  assert.equal(
+    QUESTIONS.bear_trend.instructions,
+    'How strong is the bearish (downward) pressure in this series right now, judged from the recent candles and the derived features?',
+  );
   // instructions 必須使用反引號 `state`（§4.4）
   assert.match(QUESTIONS.direction.instructions, /`state`/);
   assert.equal(

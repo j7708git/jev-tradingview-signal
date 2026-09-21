@@ -277,3 +277,65 @@ test('§4.2.1 輔助序列 sds_2 的 reset / symbol / bars 完全不得影響主
   assert.equal(em.meta.symbol, null, 'sds_sym_2 不得更新 meta.symbol');
   assert.equal(em.bars.length, 0, 'sds_2 的 366 根不得上送');
 });
+
+test('09g 站內換商品（真機 fixture）：meta.symbol=ETHUSDT、缓衝只含新商品、INTERNAL 不改符號不清缓衝', () => {
+  const raw = readFileSync('tests/fixtures/ws-symbol-switch-real.txt', 'utf8');
+  const h = setup();
+  h.ws.dispatch(raw);
+  h.sandbox.__JEV_FORCE_EMIT();
+
+  const em = h.last();
+  // (a) 符號更新為新商品（身分 sds_sym_3 可變；內容才是判準）
+  assert.equal(em.meta.symbol, 'BINANCE:ETHUSDT');
+  assert.notEqual(em.meta.symbol, 'BINANCE:BTCUSDT');
+  // (b) fixture 含 INTERNAL:SEASONALS 的 symbol_resolved：不得改 symbol、不得清缓衝
+  assert.notEqual(em.meta.symbol, 'INTERNAL:SEASONALS');
+  // (c)(d) 主圖缓衝 = 新商品 300 根；舊商品與 sds_3 的 366 根皆不在
+  assert.equal(em.meta.total, 300);
+  assert.equal(em.bars.length, 300);
+  assert.ok(
+    em.bars.every((b) => b[0] >= 1789762500 && b[0] <= 1790031600),
+    '只含新商品時間範圍的 bar（排除舊商品與 sds_3）',
+  );
+});
+
+test('09g 舊商品 bar 必須清掉：先餵 300 根 BTCUSDT，再餵換商品序列', () => {
+  const raw = readFileSync('tests/fixtures/ws-symbol-switch-real.txt', 'utf8');
+  const h = setup();
+
+  // 舊商品：BTCUSDT 300 根（時間 100_000_000 起，與 fixture 完全不重疊）。
+  h.ws.dispatch(frame(symbolResolved('BINANCE:BTCUSDT')));
+  h.ws.dispatch(frame(tsu(makeBars(100_000_000, 300))));
+  h.sandbox.__JEV_FORCE_EMIT();
+  let em = h.last();
+  assert.equal(em.meta.symbol, 'BINANCE:BTCUSDT');
+  assert.equal(em.meta.total, 300);
+
+  // 換商品序列。
+  h.ws.dispatch(raw);
+  h.sandbox.__JEV_FORCE_EMIT();
+  em = h.last();
+  assert.equal(em.meta.symbol, 'BINANCE:ETHUSDT');
+  assert.equal(em.meta.total, 300, '舊 300 根已清，只留新商品 300 根');
+  assert.equal(em.bars.length, 300);
+  assert.ok(
+    em.bars.every((b) => b[0] >= 1789762500),
+    '不得殘留舊商品（100_000_000 級）的 time',
+  );
+});
+
+test('09g INTERNAL:* 的 symbol_resolved 不得改 symbol、不得清缓衝', () => {
+  const h = setup();
+  h.ws.dispatch(frame(symbolResolved('BINANCE:AAAUSDT')));
+  h.ws.dispatch(frame(tsu(makeBars(1_000_000, 5))));
+  h.sandbox.__JEV_FORCE_EMIT();
+  assert.equal(h.last().meta.total, 5);
+
+  // 輔助序列的 symbol_resolved（身分 sds_sym_2 / INTERNAL:SEASONALS）。
+  h.ws.dispatch(frame(symbolResolved('INTERNAL:SEASONALS', 'sds_sym_2')));
+  h.sandbox.__JEV_FORCE_EMIT();
+  const em = h.last();
+  assert.equal(em.meta.symbol, 'BINANCE:AAAUSDT', 'INTERNAL 不得改 symbol');
+  assert.equal(em.meta.total, 5, 'INTERNAL 不得清缓衝');
+  assert.equal(em.reset, false);
+});

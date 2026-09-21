@@ -105,6 +105,17 @@
 - **架構師親驗（真機 e2e 8/8 PASS）**：`圖表：BINANCE:BTCUSDT · 15 · 300 根 · buffer total 300`（新增反污染斷言：根數須在 250–400，666 視為失敗）；`RUN_PREDICTION ok:true` 1000ms、17373 tokens、$0.0007；DOM 渲染 做空/做多/觀望、未來10根上漲機率 55%、趨勢強度 3.32。
 - **資料真實性交叉核對**：送進 API 的 state 300 根，最後一根 close **85,343.86** vs TV 畫面即時價 **85,355.40**（同一根進行中的 15m bar）；首末根時距 269,100 秒 = 299×900 → 恰為 300 根 15 分鐘 K 棒。
 
+### [x] Task 09g: 站內換商品：符號更新＋清掉舊商品 K 棒 ✅ 2026-09-22（pi）
+- 真機缺陷：§4.2.1 把主圖符號身分寫死 `sds_sym_1`／`ss_1`，但站內換商品後 TV 會重新編號（`sds_sym_3`／`ss_2`）→ 符號停在舊值、且新舊商品 bar 混進同一 state（真機 300＋新資料 → 337 根污染）。fixture：`tests/fixtures/ws-symbol-switch-real.txt`（236 幀）。
+- 修法（§4.2.1 規則 2/3/6/7）：符號判準改看 `p[2].full_name` 內容——`INTERNAL:` 開頭者一律忽略（不改 symbol、不清緩衝），其餘真實商品（即使身分為 `sds_sym_3`／`ss_2`）接受並更新 `meta.symbol`；真實商品變更才 `bars.clear()＋sent.clear()＋pendingReset`。主圖 bars/reset 的 seriesKey 仍為 `sds_1`；不以 URL `?symbol=` 推斷。
+- 驗收：`node --test` **127/127**（新增：真機換商品 fixture 依序餵入 → symbol=ETHUSDT、INTERNAL 不清不覆、舊 300 根 BTC 被清、sds_3 的 366 根不入緩衝）；四 gate ALL PASS；verify-inject verdict PASS。
+
+### [x] Task 09h: 趨勢強度拆成多頭/空頭兩題 ✅ 2026-09-22（pi）
+- 需求：使用者實測後要求單一 `trend_strength` 拆為 `bull_trend`（多頭趨勢強度）與 `bear_trend`（空頭趨勢強度），同為 `score` 型、同一組 5 級 criteria；面板顯示兩列。
+- 實作：`state-builder.js` QUESTIONS 移除 `trend_strength`、新增兩題（instructions 逐字對齊 §4.4）；`sidepanel/render.js` `renderTrend(answers)` 渲染兩列，舊回應含 `trend_strength` 時相容渲染單列「趨勢強度」，任一題缺漏該列顯示「—」。state 內容（OHLCV/特徵）與訊息協定不變。
+- 驗收：`node --test` **130/130**（新增：QUESTIONS 無 trend_strength、bull/bear 五級與題字、兩列渲染、缺題降級、舊 trend_strength 相容）；四 gate ALL PASS；verify-inject verdict PASS。
+- 待辦（架構師）：`scripts/live-jev.mjs` 仍以舊 `trend_strength` 驗證回應，需同步改為 `bull_trend`/`bear_trend`（scripts/ 不在本任務准改範圍）。
+
 ### [x] Task 09e: 資料不足拒預測＋門檻單一來源＋GET_STATE 觸發重同步 ✅ 2026-09-21（pi）
 - 背景：真機 e2e 揭出「SW 冷啟動後緩衝只剩 1 根，卻照樣呼叫 TypeSafe API」，回傳 觀望 91%／趨勢強度 0.06 這種垃圾（會被誤讀成訊號）。
 - 實作：`PREDICT_MIN_BARS = 50` 集中在 `lib/protocol.js`（單一來源，panel 與 sw-core 共用）；等完全量重送後仍 < 50 根 → 回 `{ok:false, err:'insufficient_data'}` 且**不呼叫 API**；`GET_STATE` 於根數不足時觸發全量重送（面板可自行恢復）。`node --test` 120/120。
@@ -113,6 +124,16 @@
 ### [x] Task 09d: resolution 讀取時機＋symbol 身分變更清緩衝 ✅ 2026-09-21（pi）
 - 09d-1（**誤判修正**）：我原先以為「網址 `interval=1`、state 卻報 15」是取樣不新鮮的缺陷。真機複查 TV 畫面週期鈕顯示 **15m** → **state 的 15 才是對的**，是 TV 自己在 SPA 期間把 URL 的 `interval` 參數寫成 1（TV 自身的 quirk），不是我們的 bug。pi 依工單把 resolution 改為 flush 當下讀 `location.search`（讀不到沿用舊值）——**保留為無害的加固**，但**不列為缺陷修復**。
 - 09d-2（**已被 §4.2.1 取代**）：原設計「收到 `symbol_resolved` 且 symbol 與當前不同即完整重置」。真機證明此判準錯誤——輔助序列（`INTERNAL:SEASONALS`）的 `symbol_resolved` 會誤觸，清掉主圖資料。正確規則：只有**主圖**（`sds_sym_1`/`ss_1`）symbol 變更才清緩衝。
+
+### [x] Task 09g: 站內換商品：符號更新＋清舊商品 K 棒 ✅ 2026-09-22（pi；使用者實測回報）
+- 使用者在自己 Chrome 實測發現：站內切換商品後面板仍顯示舊商品、payload symbol 不變。架構師真機取證（`scratch/diag27.mjs`＋fixture `tests/fixtures/ws-symbol-switch-real.txt`，236 幀）：切換後 TV **重新編號 series 身分**（`sds_sym_1`→`sds_sym_3`、`ss_1`→`ss_2`），而 09f 把身分寫死 → 新符號被當輔助序列忽略 → `meta.symbol` 停在舊值；且主圖緩衝混入新舊商品 bar（面板 337 根＝污染值）。
+- 修法（§4.2.1 規則 2／3／6／7 改寫）：符號判準改**看內容**（`INTERNAL:` 開頭者為 TV 內部輔助序列，忽略）；真實商品符號變更（即使身分是 `sds_sym_3`／`ss_2`）→ 更新 `meta.symbol` 並完整重置（`bars.clear()`＋`sent.clear()`＋`pendingReset`）；**嚴禁以 URL 的 `?symbol=` 推斷商品**（真機實測站內切換後 URL 不更新）。
+- 驗收：`node --test` **127/127**；四 gate 全過；verify-inject PASS；**真機複驗**：切換前 `{count:300, symbol:BINANCE:BTCUSDT}` → 切換後 `{count:300, symbol:BINANCE:ETHUSDT}`（不再 337）、inject 發出乾淨的 `{n:300, reset:true, sym:ETHUSDT}`。
+
+### [x] Task 09h: 趨勢強度拆成「多頭／空頭」兩題 ✅ 2026-09-22（pi；使用者需求變更）
+- 使用者要求：原本單一「趨勢強度」→ 拆成**多頭趨勢強度／空頭趨勢強度**兩個數值。
+- 作法：`systemone` 題目把 `trend_strength` 換成 `bull_trend`＋`bear_trend`（皆 `score`、同 5 級 criteria），面板渲染兩列並保留舊 `trend_strength` 的相容分支。規格：`docs/ARCHITECTURE.md` §4.4、`docs/PRD.md` 問題組合（三題→四題）。
+- 驗收：`node --test` **130/130**；四 gate 全過；verify-inject PASS；**真機 e2e 8/8 PASS**：`多頭趨勢強度 2.59 ｜ 空頭趨勢強度 0.78`（真實 TypeSafe 回應，1009ms、17551 tokens、$0.0007）。
 
 ### [-] Task 09: e2e 人工驗收（架構師＋使用者）— 進行中
 - 目標：真實 Chrome 載入未封裝擴充 → 開 TV 圖表 → 按預測 → Panel 出結果。

@@ -28,11 +28,16 @@
   // §4.2.1：主圖 series key 單一來源在 lib/protocol.js；這裡只讀取，不硬寫字面值。
   var mainSeriesKey =
     typeof MAIN_SERIES_KEY !== 'undefined' ? MAIN_SERIES_KEY : undefined;
-  // 可更新 meta.symbol 的主序列身分（sds_sym_1＝主圖 series、ss_1＝圖表 study 符號）。
-  var MAIN_SYMBOL_REFS = ['sds_sym_1', 'ss_1'];
 
-  function isMainSymbolRef(ref) {
-    return typeof ref === 'string' && MAIN_SYMBOL_REFS.indexOf(ref) !== -1;
+  // §4.2.1 規則 2：符號身分（sds_sym_1／ss_1）會於站內換商品時重新編號，
+  // 故不得用固定索引判斷主圖；改以符號「內容」判定：INTERNAL:* 為 TV 內部
+  // 輔助序列，一律忽略；其餘非空字串才是真實商品符號。
+  function isRealSymbol(name) {
+    return (
+      typeof name === 'string' &&
+      name.length > 0 &&
+      name.indexOf('INTERNAL:') !== 0
+    );
   }
 
   // 內部狀態
@@ -163,17 +168,18 @@
         ignoredSeriesFrames += 1;
       }
     } else if (res.kind === 'meta') {
-      // §4.2.1：只有主序列身分（sds_sym_1 / ss_1）可更新 meta.symbol。
-      if (isMainSymbolRef(res.seriesRef)) {
-        var nextSymbol = res.symbol;
-        if (nextSymbol != null && symbol != null && nextSymbol !== symbol) {
-          // 只有「主圖」symbol 真的變更才完整重置（輔助序列造成的變更不得清缓衝）。
+      // §4.2.1 規則 2／6：以符號內容判定真實商品，不依賴可變的身分索引。
+      var nextSymbol = res.symbol;
+      if (isRealSymbol(nextSymbol)) {
+        if (nextSymbol !== symbol) {
+          // 規則 3：真實商品變更（含首次得知）→ 完整重置，避免新舊商品 bar 混入。
+          // INTERNAL:* 不會走到這裡，故不會清任何東西。
           bars.clear();
           sent.clear();
           pendingReset = true;
           schedule();
         }
-        if (nextSymbol != null) symbol = nextSymbol;
+        symbol = nextSymbol;
       } else {
         ignoredSeriesFrames += 1;
       }

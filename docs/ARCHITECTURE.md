@@ -134,10 +134,23 @@ TradingView-Jev-Signal/
 規則（違反即為資料污染，比缺資料更嚴重）：
 
 1. **主圖 series 恆為 `sds_1`**；`sds_2`、`sds_3`… 為輔助/衍生序列（TV 內部，如 `INTERNAL:SEASONALS`）。只消費 `sds_1` 的 `bars`／`du`；其餘 series 的資料一律丟棄並計數。
-2. **`symbol_resolved` 必須帶 series 身分**（`p[1]`）：只有 `sds_sym_1`（或圖表 `ss_1`）能改 `meta.symbol`；`sds_sym_2+` 一律忽略。
-3. **reset 依 series 作用**：`series_loading` 的 `p[1]` 為 seriesKey，只有 `sds_1` 的 reset 能重置主圖緩衝；輔助 series 的 reset 不得動主圖（09d-2「任何 symbol 變更即清緩衝」為**錯誤設計**，已由本節取代：只有**主圖** symbol 變更才清緩衝）。
+2. **`symbol_resolved` 的 `p[1]` 是 series 身分、但身分會「重新編號」**：初次載入為 `sds_sym_1`／`ss_1`，站內換商品後變成 `sds_sym_3`／`ss_2`（真機實測）。因此**不得用固定索引判斷主圖** —— 判準改為**看符號內容**：`p[2].full_name` 以 `INTERNAL:` 開頭者為 TV 內部輔助序列，一律忽略、不得改 `meta.symbol`；其餘（真實交易所符號）視為主圖符號，即使身分是 `sds_sym_3`／`ss_2` 也要接受。
+3. **主圖重置與清緩衝**：`series_loading` 的 `p[1]` 為 seriesKey，只有 `sds_1` 的 reset 能作用於主圖緩衝（`sds_2+`／`sds_3+` 的 reset 不得動主圖）。主圖 reset 本身依 §4.7 只清 sent 游標、**不清 bar**；但**真實符號（非 `INTERNAL:`）變更時必須完整重置**（`bars.clear()`＋`sent.clear()`＋pendingReset），否則站內換商品會把新舊商品的 K 棒混在同一個 state 裡（真機實測 300＋新資料 → 337 根的污染值）。
 4. 解析器 `classifyPayload` 的 `{kind:'meta'}` 結果必須帶 `seriesRef`（`p[1]`），`{kind:'bars'|'control'}` 既有的 `seriesKey` 語意不變。
 5. **驗收基準**：真機 15m BTCUSDT 開圖後主圖緩衝應為 `300 + 尾根`（≈301–310），**永不為 666**（666 = 300 主圖 + 366 輔助序列，為污染狀態）。
+6. **站內換商品（SPA）真機取證**（fixture：`tests/fixtures/ws-symbol-switch-real.txt`，236 幀）：
+   ```
+   bars/sds_1/1                                   ← 舊商品尾根
+   reset/sds_1                                    ← 主圖重置
+   meta/sds_sym_3/BINANCE:ETHUSDT                 ← 新符號（身分改為 sds_sym_3）
+   bars/sds_1/300                                 ← 新商品 300 根
+   reset/sds_3                                    ← 輔助序列改用 sds_3
+   meta/sds_sym_4/INTERNAL:SEASONALS              ← 輔助符號
+   meta/ss_2/BINANCE:ETHUSDT                      ← 身分 ss_2（不再是 ss_1）
+   bars/sds_3/366                                 ← 輔助 366 根（必須丟棄）
+   ```
+   對應要求：主圖 seriesKey 仍是 `sds_1`（不變），但**符號身分索引會跳號**；且**站內換商品時 `location.href` 的 `?symbol=` 不會更新**（真機實測仍顯示舊商品）→ **嚴禁以 URL 推斷當前商品**，唯一可信來源是主圖的 `symbol_resolved`。
+7. 換商品後的正確結果：`meta.symbol` 立即變為新商品、主圖緩衝為新商品的 `300 + 尾根`（**不含**舊商品任何 bar）。
 
 ### 4.3 ChartBuffer（lib/chart-buffer.js）
 
@@ -171,14 +184,20 @@ TradingView-Jev-Signal/
         "short": "Price more likely to fall than rise from here" } },
     "up_10_bars": { "type": "noul",
       "instructions": "Will the close 10 bars from now be above the latest close?" },
-    "trend_strength": { "type": "score",
-      "instructions": "How strong is the prevailing trend in this series?",
+    "bull_trend": { "type": "score",
+      "instructions": "How strong is the bullish (upward) pressure in this series right now, judged from the recent candles and the derived features?",
+      "criteria": ["none","weak","moderate","strong","very strong"] },
+    "bear_trend": { "type": "score",
+      "instructions": "How strong is the bearish (downward) pressure in this series right now, judged from the recent candles and the derived features?",
       "criteria": ["none","weak","moderate","strong","very strong"] }
   }
 }
 ```
 
-回應（已查證 docs.typesafe.ai/api）：`{ model, answers:{direction:{choice,probabilities,confidence}, up_10_bars:{noul}, trend_strength:{score,legend,probabilities,confidence}}, usage:{input_tokens,output_tokens} }`。
+> 2026-09-22 使用者實測後要求：原本單一 `trend_strength` 拆成 **`bull_trend`（多頭趨勢強度）／`bear_trend`（空頭趨勢強度）** 兩題，原題廢除。成本影響：多一題 score，輸出 token 少量增加（實測單次仍 <$0.001）。
+> 面板相容：若舊回應仍含 `trend_strength`，照舊渲染「趨勢強度」一列；新回應渲染兩列「多頭趨勢強度／空頭趨勢強度」。
+
+回應（已查證 docs.typesafe.ai/api）：`{ model, answers:{direction:{choice,probabilities,confidence}, up_10_bars:{noul}, bull_trend:{score,legend,probabilities,confidence}, bear_trend:{score,legend,probabilities,confidence}}, usage:{input_tokens,output_tokens} }`。
 
 錯誤正規化（client 一律拋統一 `JevError{kind}`）：`no_key`(未設定) / `auth_401` / `bad_request_422` / `rate_429`（退避重試 500ms→1s→2s，3 次後 `rate_exhausted`）/ `overloaded_529`（同 429）/ `timeout` / `offline` / `offhost`(回應非 2xx 其他)。429/529 之外的非 2xx **不重試**。原因：Jev 是判斷服務不是資料服務，重複打非限流錯誤沒有意義。
 

@@ -30,9 +30,16 @@ export const QUESTIONS = {
     type: 'noul',
     instructions: 'Will the close 10 bars from now be above the latest close?',
   },
-  trend_strength: {
+  bull_trend: {
     type: 'score',
-    instructions: 'How strong is the prevailing trend in this series?',
+    instructions:
+      'How strong is the bullish (upward) pressure in this series right now, judged from the recent candles and the derived features?',
+    criteria: ['none', 'weak', 'moderate', 'strong', 'very strong'],
+  },
+  bear_trend: {
+    type: 'score',
+    instructions:
+      'How strong is the bearish (downward) pressure in this series right now, judged from the recent candles and the derived features?',
     criteria: ['none', 'weak', 'moderate', 'strong', 'very strong'],
   },
 };

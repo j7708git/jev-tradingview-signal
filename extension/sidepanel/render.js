@@ -123,7 +123,7 @@ export function renderProbabilities(probabilities) {
 }
 
 /**
- * trend_strength：把 score 以答案附的 legend 映射成級名（score 可為索引或字串）。
+ * score 趨勢：把 score 以答案附的 legend 映射成級名（score 可為索引或字串）。
  */
 export function trendLevel(trend) {
   const t = trend || {};
@@ -138,15 +138,35 @@ export function trendLevel(trend) {
   return t.score == null ? '—' : String(t.score);
 }
 
-export function renderTrend(trend) {
+/** 單列趨勢強度（label + legend 級名；缺資料時該列顯示「—」，不拋錯）。 */
+export function renderTrendRow(label, trend) {
   const level = trendLevel(trend);
   const raw = trend && trend.score != null ? String(trend.score) : '—';
   const rawHtml =
     raw !== level ? `<span class="trend-raw">${escapeHtml(raw)}</span>` : '';
   return (
-    `<div class="trend"><span class="trend-label">趨勢強度</span>` +
+    `<div class="trend"><span class="trend-label">${escapeHtml(label)}</span>` +
     `<span class="trend-score">${escapeHtml(level)}</span>${rawHtml}</div>`
   );
+}
+
+/**
+ * 趨勢強度（Task 09h）：新回應渲染「多頭趨勢強度／空頭趨勢強度」兩列；
+ * 任一題缺漏時該列顯示「—」。舊回應若仍含 `trend_strength`，
+ * 相容渲染單列「趨勢強度」。
+ */
+export function renderTrend(answers) {
+  const a = answers || {};
+  if (a.bull_trend !== undefined || a.bear_trend !== undefined) {
+    return (
+      renderTrendRow('多頭趨勢強度', a.bull_trend) +
+      renderTrendRow('空頭趨勢強度', a.bear_trend)
+    );
+  }
+  if (a.trend_strength !== undefined) {
+    return renderTrendRow('趨勢強度', a.trend_strength);
+  }
+  return '';
 }
 
 /** up_10_bars.noul → 「未來 10 根上漲機率：NN%」。 */
@@ -218,7 +238,7 @@ export function renderResult(last, opts = {}) {
     renderDirection(direction) +
     renderProbabilities(direction.probabilities) +
     renderUp10(answers.up_10_bars) +
-    renderTrend(answers.trend_strength) +
+    renderTrend(answers) +
     renderCost(last, opts.model) +
     renderDetails(last) +
     `<p class="disclaimer">${DISCLAIMER}</p>` +

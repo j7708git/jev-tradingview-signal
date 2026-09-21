@@ -54,6 +54,6 @@ Denny 在 Chrome 使用 TradingView 看圖。本專案做一個個人用 Chrome 
 | 取數方式 | 掛載頁面 WebSocket 旁聽（方案②） | 使用者明確選擇 |
 | 取數深度 | 第一期只旁聽已載入 K 棒；協定層預留主動拉深度介面 | 建議預設（超時未答） |
 | state 內容 | OHLCV＋本地派生特徵（MA/RSI/動量）；特徵開關可關 | 建議預設（超時未答） |
-| 問題組合 | 三題：direction(choice)＋up_10_bars(noul)＋trend_strength(score) | 建議預設（超時未答） |
+| 問題組合 | 四題：direction(choice)＋up_10_bars(noul)＋bull_trend(score)＋bear_trend(score)。2026-09-22 使用者實測後要求把原「趨勢強度」拆成**多頭趨勢強度／空頭趨勢強度**兩題（原 trend_strength 廢除） | 使用者明確要求 |
 | 使用方式 | 手動按鈕→一次預測，Side Panel 顯示 | 使用者明確選擇 |
 | 定位 | 個人工具，chrome://extensions 載入；好用再考慮上架 | 使用者明確選擇 |

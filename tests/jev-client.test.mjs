@@ -107,11 +107,13 @@ test('成功路徑：URL/method/headers/body 全對，回三答案與 usage', as
   assert.deepEqual(Object.keys(result.answers), [
     'direction',
     'up_10_bars',
-    'trend_strength',
+    'bull_trend',
+    'bear_trend',
   ]);
   assert.equal(result.answers.direction.choice, 'long');
   assert.equal(result.answers.up_10_bars.noul, 0.58);
-  assert.equal(result.answers.trend_strength.score, 'moderate');
+  assert.equal(result.answers.bull_trend.score, 'strong');
+  assert.equal(result.answers.bear_trend.score, 'weak');
   assert.deepEqual(result.usage, { input_tokens: 1234, output_tokens: 56 });
 
   // 請求完全正確
