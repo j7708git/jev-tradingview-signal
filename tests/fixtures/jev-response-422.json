@@ -1,0 +1,14 @@
+{
+  "detail": [
+    {
+      "loc": ["body", "questions", "up_10_bars"],
+      "msg": "field required",
+      "type": "value_error.missing"
+    },
+    {
+      "loc": ["body", "state", "bars"],
+      "msg": "ensure this value has at least 1 items",
+      "type": "value_error.any_list.min_length"
+    }
+  ]
+}

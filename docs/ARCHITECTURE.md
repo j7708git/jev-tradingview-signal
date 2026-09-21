@@ -164,22 +164,25 @@ TradingView-Jev-Signal/
   "manifest_version": 3,
   "name": "Jev Signal",
   "version": "0.1.0",
-  "permissions": ["storage", "sidePanel", "scripting", "activeTab"],
+  "permissions": ["storage", "sidePanel", "activeTab"],
   "host_permissions": [
     "https://www.tradingview.com/*",     // 注入＋旁聽其 ws
     "https://api.typesafe.ai/*"          // 唯一外呼出口
   ],
   "background": { "service_worker": "background/service-worker.js", "type": "module" },
-  "content_scripts": [{
-    "matches": ["https://www.tradingview.com/chart/*"],
-    "js": ["content/bridge.js"], "run_at": "document_start" }],
+  "content_scripts": [
+    { "matches": ["https://www.tradingview.com/chart/*"],
+      "js": ["content/inject.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["https://www.tradingview.com/chart/*"],
+      "js": ["content/bridge.js"], "run_at": "document_start" }
+  ],
   "side_panel": { "default_path": "sidepanel/sidepanel.html" },
   "options_page": "options/options.html",
   "action": { "default_title": "Open Jev Signal" }
 }
 ```
 
-inject.js 經 `chrome.scripting.registerContentScripts` 以 `world: 'MAIN'`, `injectImmediately: true` 註冊（`document_start` 必須早於頁面建 ws；此點為本專案成立與否的關鍵，Task 02 先做取證）。原因：content script 的 isolated world 包不到頁面的 `window.WebSocket`。
+inject.js 與 bridge.js 一律**靜態宣告**於 manifest `content_scripts`（`world:'MAIN'` / `run_at:'document_start'` 直接支援，見 §4.5）→ 命中 matches 即保證先於頁面建 ws。不使用 `chrome.scripting` 動態註冊（多一條權限、多一套注釋、且無 injectImmediately 等價物流）。Task 01 取證用 CDP 導航級注入＝靜態宣告之時序等價路徑，結論直接適用。（原「經 registerContentScripts 註冊」之表述作廢；`permissions` 移除 `scripting`。）
 
 ## 5. 安全規則
 

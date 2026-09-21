@@ -44,3 +44,9 @@
 ## 5. 對 ARCHITECTURE 的修訂
 
 §4.2 原文假設「空格分隔 mem 幀、MF××× 欄位、fields_order」→ **作廢**，改照本報告 §1/§2/§3。已回寫 ARCHITECTURE.md。
+
+## 6. 證據檔已知瑕疵（Task 03 實測發現，後續任务須知）
+
+- fixtures 內 `symbol_resolved` 的 `p` 欄在導出時被 slice(1200) 截斷 → **非合法 JSON**（parse-evidence.mjs 與 ws-parse 測試皆以 regex 取 full_name 復建）。真實 ws 不受影響。
+- `du` 為成交級推送：會覆寫 tsu 快照尾根並追加新根（實測 time 1789989900 close 84689.99→串流值、新增 1789990200）→ 逐值比對一律用 **tsu 還原序列**，串流語意另測（Task 03 測試已樹立典範）。
+- `classifyPayload(payload, meta)` 第二參數為 pi 自加的型別後援（接受裸 p 陣列/meta.m），已核准納入契約，Task 06/07 可無視之。

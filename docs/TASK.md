@@ -23,36 +23,40 @@
 
 ## Phase 1 — 純資料層（無浏览器依賴，pi 可全自動驗證）
 
-### [ ] Task 02: 骨架＋lib/protocol.js＋lib/chart-buffer.js（含測試）
+### [-] Task 02: 骨架＋lib/protocol.js＋lib/chart-buffer.js（含測試）→ pi（2026-09-21 派工中）
 - 目標：專案骨架（見 ARCHITECTURE §3 目錄）、manifest 佔位可載入；protocol 常數與 ChartBuffer（upsert/滚动上限/snapshot）＋`node --test` 全綠。
 - Target Files: `extension/manifest.json`、`extension/lib/protocol.js`、`extension/lib/chart-buffer.js`、`tests/chart-buffer.test.mjs`、`tests/protocol.test.mjs`、`tests/fixtures/bars-300.json`、`package.json`（僅 scripts，無 dependencies）。
 - 驗收：`node --test tests/` 全綠；`node -e "import('./extension/lib/chart-buffer.js').then(m=>{const b=new m.ChartBuffer(3000);console.log(b.constructor.name)})"` 輸出 `ChartBuffer`。
-- [x] 完成紀錄：（待填）
+- [x] 完成紀錄：**2026-09-21 pi 執行，架構師親驗全綠**（`node --test` 12/12、ChartBuffer import OK、static-check task02 ALL PASS、git status 確認未越界）。pi 回報一項契約衝突（§4.5 動態註冊 vs gate 靜態宣告）→ 架構師定案改採**靜態宣告**（world:'MAIN' 自 Chrome 111 為 manifest 一級公民，省 `scripting` 權限），已修 ARCHITECTURE §4.5／static-check；pi 另測出 `TV_WS_URL_RE` 缺邊界錨點（`tradingview.com.evil.com` 誤判）→ 列為 Task 03 附帶修補項。
 
-### [ ] Task 03: parseMemFrames ＋ features.js（MA/RSI/動量）（含測試）
+### [x] Task 03: ws-parse ＋ features.js（MA/RSI/動量）＋兩項附帶修補 ✅ 2026-09-21（pi）
 - 目標：依 Task 01 的 WS-NOTES 實作協定解析（純函式，Node 可測）；features 純數學（SMA/RSI14 Wilder/動量/区间%），對 expected fixture 容差 1e-9。
 - Target Files: `extension/lib/ws-parse.js`、`extension/lib/features.js`、`tests/ws-parse.test.mjs`、`tests/features.test.mjs`、fixtures。
 - 驗收：`node --test tests/` 全綠；`node scripts/parse-fixture.mjs tests/fixtures/ws-sample-1.txt` 复現 Task 01 同一斷言。
-- [x] 完成紀錄：（待填）
+- [x] 完成紀錄：**2026-09-21 pi 執行，架構師親驗全綠**（`node --test` 32/32＝12 舊零回歸＋20 新；static-check 含修補 B gate ALL PASS；regex 負例通過）。修補 A（TV_WS_URL_RE 錨點）＋修補 B（去 scripting）同場完成。pi 四項偏差全數核准：逐值比對改用 tsu 還原序列（du 會覆寫尾根，屬協定語意）、fixture 的 symbol_resolved 截斷瑕疵已記 WS-NOTES §6、RSI 教科書序列後段自然跌落 57.97（斷言據實收窄）、`classifyPayload` 第二參數後援納入契約。原驗收命令 `parse-fixture.mjs` 由 `scripts/parse-evidence.mjs`（Task 01 版）＋ws-parse 測試的 fixture 還原斷言取代。
 
-### [ ] Task 04: state-builder.js（含 questions 常數與特徵開關）
+### [x] Task 04: state-builder.js（含 questions 常數與特徵開關）✅ 2026-09-21（pi）
 - 目標：snapshot＋features → §4.4 的 state JSON；`features:false` 時不出現 `features`；bars 截尾（預設 300）；token 估算函式 `estimateTokens(state)`。
 - Target Files: `extension/lib/state-builder.js`、`tests/state-builder.test.mjs`、`tests/fixtures/expected-state.json`。
 - 驗收：`node --test tests/` 全綠；`JSON.stringify(buildState(snap,{bars:300,features:true}))` 對 expected-state.json 深度相等（時間戳欄位正規化後）。
-- [x] 完成紀錄：（待填）
+- [x] 完成紀錄：**2026-09-21 pi 執行，架構師親驗全綠**（`node --test` 43/43＝32 零回歸＋11 新；QUESTIONS 三 id 正確；golden sha256 二次生成 byte 相同；獨立重跑 deepStrictEqual true；`estimateTokens`=4231 → 300 根 state ≈4.2K token，成本上界再獲實據）。契約裁定：pi 問「barsWindow 過濾邊界」→ 以「實際送出根數」為準（本專案 bars 只來自 ChartBuffer，非法欄位不經產線路徑）；tests 內 pin TZ=Asia/Taipei 屬正當手法；`toLocalIso` 私有化核准。
 
-### [ ] Task 05: jev-client.js（fetch＋退避重試＋錯誤正規化）
-- 目標：§4.4/§5 契約的實作；fetch 可注入（fake fetch 測試）；重試僅 429/529；錯誤 kind 齊全；任何輸出路徑不洩 key。
+### [x] Task 05: jev-client.js（fetch＋退避重試＋錯誤正規化）✅ 2026-09-21（pi＋架構師 live 補驗）
+- 目標：§4.4/§5 契約的實作；fetch 可注入（fake fetch 測試）；重試僅 429/529；錯誤 kind 齊滿；任何輸出路徑不洩 key。
 - Target Files: `extension/lib/jev-client.js`、`tests/jev-client.test.mjs`、`tests/fixtures/jev-response-ok.json`、`tests/fixtures/jev-response-422.json`。
 - 驗收：`node --test tests/` 全綠；`node scripts/live-jev.mjs`（讀 `JEV_API_KEY` 環境變數，對 expected-state 打真 API）回 `direction`／`up_10_bars`／`trend_strength` 三答案與 usage。
-- [x] 完成紀錄：（待填）
+- [x] 完成紀錄：**2026-09-21 pi 執行（不打網路）＋架構師以 `scripts/live-jev.mjs` 補做真實 API 驗證**。
+  - 離線：`node --test` 64/64（43 零回歸＋21 新，全错误路徑＋redact 偵測斷言）；static-check ALL PASS；契約匯出核對通過。
+  - **LIVE（金標 300 根 BTC 1m → 真實 https://api.typesafe.ai/v1/systemone）**：`verdict: PASS (1003ms)`，judge=`jev-1.13.0`，三答案齊——direction=long（P: long .44/neutral .23/short .33, confidence .15）、up_10_bars noul=.55、trend_strength=3.12/strong（confidence .77）；usage 17,262 in / 74 out → **$0.00073/次**（PRD 成本標準 ≤$0.005 的 1/7）。
+  - 合理性旁證：輸出恰是「強趨勢但方向低信心」——符合校準機率語意，非固定口癖。
+  - 備註：`estimateTokens` 估 4.2K vs 實際 17.3K（Jev tokenizer 對數字串更貴）→ 成本結論不變，Panel 的「成本顯示」以 usage 實測為準（Task 08 注意）。pi 附加項（USER_AGENT 匯出、非物件 200→offhost）核准。
 
 ## Phase 2 — Extension 接線
 
 ### [ ] Task 06: inject.js（world:MAIN ws 包裝）＋ content/bridge.js
 - 目標：§4.2 旁聽規則＋節流增量上送；重連/心跳；零改動 ws 行為。
-- Target Files: `extension/content/inject.js`、`extension/content/bridge.js`、（必要的 `registerContentScripts` 註冊碼進 SW 佔位）。
-- 驗收：`node --test tests/` 仍全綠（不得破壞 lib）；加載後人工/自動化檢查見 Task 09；pi 另產 `node scripts/static-check.mjs`（正則斷言：無 `send` 覆寫、有 origin 校驗、有 `v===1` 校驗）。
+- Target Files: `extension/content/inject.js`、`extension/content/bridge.js`（manifest 已靜態宣告兩檔，無需 registerContentScripts 代碼）。
+- 驗收：`node --test tests/` 仍全綠（不得破壞 lib）；`node scripts/static-check.mjs task06`（正則斷言：無 `send` 覆寫、有 origin 校驗、有版本欄校驗、冪等旗標）；加載後人工/自動化檢查見 Task 09。
 - [x] 完成紀錄：（待填）
 
 ### [ ] Task 07: service-worker 編排（registry、RUN_PREDICTION、PREDICTION_UPDATED）

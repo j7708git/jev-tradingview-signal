@@ -1,0 +1,33 @@
+{
+  "model": "jev-latest",
+  "answers": {
+    "direction": {
+      "choice": "long",
+      "probabilities": {
+        "long": 0.62,
+        "neutral": 0.23,
+        "short": 0.15
+      },
+      "confidence": 0.62
+    },
+    "up_10_bars": {
+      "noul": 0.58
+    },
+    "trend_strength": {
+      "score": "moderate",
+      "legend": ["none", "weak", "moderate", "strong", "very strong"],
+      "probabilities": {
+        "none": 0.05,
+        "weak": 0.2,
+        "moderate": 0.45,
+        "strong": 0.25,
+        "very strong": 0.05
+      },
+      "confidence": 0.45
+    }
+  },
+  "usage": {
+    "input_tokens": 1234,
+    "output_tokens": 56
+  }
+}

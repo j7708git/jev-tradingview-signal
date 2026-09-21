@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Jev Signal",
+  "version": "0.1.0",
+  "description": "TradingView chart OHLCV -> TypeSafe Jev prediction side panel (research only).",
+  "permissions": ["storage", "sidePanel", "activeTab"],
+  "host_permissions": [
+    "https://www.tradingview.com/*",
+    "https://api.typesafe.ai/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.tradingview.com/chart/*"],
+      "js": ["content/inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://www.tradingview.com/chart/*"],
+      "js": ["content/bridge.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "side_panel": {
+    "default_path": "sidepanel/sidepanel.html"
+  },
+  "options_page": "options/options.html",
+  "action": {
+    "default_title": "Open Jev Signal"
+  }
+}
