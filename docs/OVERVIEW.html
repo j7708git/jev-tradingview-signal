@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>jev-signal 總覽</title>
+<style>
+  .wrap { font-family: var(--app-font, system-ui, sans-serif); color: var(--foreground); padding: 20px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted-foreground); font-size: 13px; margin-bottom: 18px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 8px; color: var(--accent); }
+  .card ul, .card ol { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; }
+  .flow { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 18px; font-size: 12.5px; }
+  .flow pre { margin: 0; white-space: pre-wrap; line-height: 1.5; color: var(--muted-foreground); }
+  .task { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
+  .task:last-child { border-bottom: none; }
+  .st { flex: 0 0 auto; font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted-foreground); }
+  .st.done { background: var(--accent); color: var(--card); border-color: var(--accent); }
+  .st.doing { border-color: var(--accent); color: var(--accent); }
+  .st.opt { opacity: .6; }
+  .who { color: var(--muted-foreground); font-size: 11.5px; }
+  .bar { height: 6px; background: var(--border); border-radius: 3px; margin: 10px 0 16px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); width: 0%; transition: width .4s; }
+  .note { font-size: 12px; color: var(--muted-foreground); margin-top: 14px; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>jev-signal — TradingView × Jev 預測 Chrome Extension</h1>
+  <div class="sub">個人工具・MV3・零依賴・手動按鈕 → 一次盤勢判斷（多/觀/空＋校準機率）</div>
+
+  <div class="flow"><pre>TradingView 分頁（注入 world:MAIN 旁聽自家 WebSocket → mem 幀 → OHLCV 滚动緩衝）
+        → content bridge → service worker（快照→派生特徵→state 組裝）
+        → POST api.typesafe.ai /v1/systemone（jev-latest，三題：direction/up_10_bars/trend_strength）
+        → Side Panel：方向徽章＋機率條＋confidence＋token 成本＋原始 JSON</pre></div>
+
+  <div class="grid">
+    <div class="card"><h2>已定案決策</h2><ul>
+      <li>直打 TypeSafe 官方 API，<b>繞過 jev-proxy</b>（零後端改動）</li>
+      <li>取數＝頁面 ws 旁聽（不發自製訂閱、不改 send）</li>
+      <li>第一期只旁聽已載入 K 棒（600–1000 根），預測取最近 300 根</li>
+      <li>state＝OHLCV＋本地派生特徵（MA20/50、RSI14、動量），開關可關</li>
+      <li>不做：下單、回測、TV 指標數值、持久化、上架</li>
+    </ul></div>
+    <div class="card"><h2>你需要準備</h2><ol>
+      <li><b>TypeSafe API key</b>（console.typesafe.ai 申請）→ 之後貼在擴充設定頁，本機環境變數 <code>JEV_API_KEY</code> 供驗證腳本用</li>
+      <li>Chrome 保持可登陸 TradingView（Task 01 取證與 Task 09 驗收要用真實圖表）</li>
+      <li>簽核本總覽＋docs 四件套 → 說「簽核，開始 Task 01」</li>
+    </ol>
+    <div class="note">成本預估：300 根 K 棒 ≈ 1 萬 token ≈ 每次預測 <b>&lt; $0.0005</b>；Jev 延遲 70–500ms，按鈕體驗接近即時。</div></div>
+  </div>
+
+  <h2 style="font-size:15px;margin:0 0 2px">任務進度</h2>
+  <div class="bar"><i id="prog"></i></div>
+  <div id="tasks"></div>
+
+  <div class="note">風險提示：Task 01 是全案成敗關鍵（TV 私有 ws 協定為逆推工程）。若取證失敗，備援方案為「直接呼叫 TV 資料端點」，需重新簽核 ARCHITECTURE §4.2。文件：docs/PRD.md・docs/ARCHITECTURE.md・docs/TASK.md。</div>
+</div>
+<script>
+const DONE = new Set(['01']);      // 完成後放 '01' …
+const DOING = new Set([]);         // 進行中
+const TASKS = [
+  ['01','TV ws 協定取證 spike（成敗關鍵）','架構師親執行'],
+  ['02','骨架＋protocol＋ChartBuffer','pi'],
+  ['03','ws 解析＋派生特徵','pi'],
+  ['04','state-builder＋questions','pi'],
+  ['05','jev-client（退避重試＋錯誤正規化）','pi'],
+  ['06','inject.js＋content bridge','pi'],
+  ['07','service worker 編排','pi'],
+  ['08','Side Panel＋Options','pi'],
+  ['09','端到端人工驗收','架構師＋你'],
+  ['10','除錯增強（選做）','pi'],
+];
+const el = document.getElementById('tasks');
+el.innerHTML = TASKS.map(([id,name,who]) => {
+  const cls = DONE.has(id) ? 'done' : DOING.has(id) ? 'doing' : id === '10' ? 'opt' : '';
+  const label = DONE.has(id) ? '完成' : DOING.has(id) ? '進行中' : id === '10' ? '選做' : '待辦';
+  return `<div class="task"><span class="st ${cls}">${label}</span><b>Task ${id}</b> ${name}<span class="who">${who}</span></div>`;
+}).join('');
+document.getElementById('prog').style.width = Math.round(DONE.size / TASKS.length * 100) + '%';
+</script>
+</body>
+</html>

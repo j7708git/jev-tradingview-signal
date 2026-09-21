@@ -1,0 +1,96 @@
+# TASK — jev-signal
+
+嚴格串行；一次只派一個。`[ ]` 待辦 / `[-]` 進行中 / `[x]` 完成。
+派工對象預設 **pi**（`pi -p`），驗收命令一律在專案根 `D:/Agent開發項目工作區/Typesafe_Jev/jev-signal` 的 git-bash 可執行。
+
+> ⚠ 本專案與一般 web 專案的差異：Task 01 是**取證 spike**，由架構師親自在真實 Chrome＋TradingView 執行（需要登陸狀態的瀏覽器），pi 無法代替。pi 的派工從 Task 02 開始。
+
+---
+
+## Phase 0 — 風險消減
+
+### [x] Task 01: TV ws 協定取證 spike（架構師執行，不派工）✅ 2026-09-21 ALL PASS
+- 目標：證實「注入 world:MAIN 包 `window.WebSocket` → 旁聽 `mem` 幀 → 解出列式 OHLCV」這條路在當前 tradingview.com 可行，產出 1 份真實 ws 樣本與 1 份解析斷言。
+- 產出物：`tests/fixtures/ws-sample-*.txt`（去敏感資訊的真實幀）、`docs/WS-NOTES.md`（欄位序、series key 規則、哪些幀型別有資料、dropped 統計）、最小 `parseMemFrames` 參考實作（放 `docs/` 附錄或臨時腳本，正式實作歸 Task 03）。
+- 驗收：`node scripts/parse-fixture.mjs tests/fixtures/ws-sample-1.txt` 印出 ≥1 個 series、bar 數 ≥100、`fieldsOrder == [time,open,high,low,close,volume]`（time 為秒、單調递增）。
+- 失敗分岔：若 TV 當前排協定與假設不符 → 就地修正 ARCHITECTURE §4.2 再往下；若注入拿不到 → 切到備援「直接呼叫 TV 資料端點」重寫 §4.2（需使用者再簽核）。
+- [x] **完成（2026-09-21，架構師親自執行）**：全案假設成立，ALL PASS ×2。
+  - 實測協定：socket.io 分幀 `~m~<len>~m~`（**非**舊 mem 幀）→ §4.2 已依實測改寫；整段歷史在 `timescale_update.p[1].sds_1.s[]`（300 根、`v=[t,o,h,l,c,v]` 秒級）；尾根即時在 `du`（實測 272 推送）；符號在 `symbol_resolved`；**timeframe 不在協定內**，定案讀 URL `interval`＋tsu 時間差交叉驗證。
+  - 注入時機驗證：CDP 導航級注入＝未來 MV3 `world:MAIN+document_start+injectImmediately` 等價路徑，重載後首包即入帳；SPA 內切符號（ETH 15m）觸發完整重載入週期 → 新 300 根＋du 無縫接手（index 校驗通過）。
+  - 交叉驗證：tsu 尾根 close 84,689.99 == 頁面標題價格；legend OHLC == du 串流值。
+  - 證據檔：`tests/fixtures/ws-evidence-btc-1m.json`、`ws-evidence-eth-15m.json`、`bars-*-300.json`×2；解析器 `scripts/parse-evidence.mjs`；報告 `docs/WS-NOTES.md`。
+  - 返修記錄：斷言初版要求「tsu 尾根 close == 最早 du close」失敗×2 → 根因：du 為成交級持續推送，快照後 230ms 即刷新 → 改為斷言「同一根 bar（i+time 相同）」與「最新 du close 已不同」，屬測試設計修正，非實作缺陷。
+
+## Phase 1 — 純資料層（無浏览器依賴，pi 可全自動驗證）
+
+### [ ] Task 02: 骨架＋lib/protocol.js＋lib/chart-buffer.js（含測試）
+- 目標：專案骨架（見 ARCHITECTURE §3 目錄）、manifest 佔位可載入；protocol 常數與 ChartBuffer（upsert/滚动上限/snapshot）＋`node --test` 全綠。
+- Target Files: `extension/manifest.json`、`extension/lib/protocol.js`、`extension/lib/chart-buffer.js`、`tests/chart-buffer.test.mjs`、`tests/protocol.test.mjs`、`tests/fixtures/bars-300.json`、`package.json`（僅 scripts，無 dependencies）。
+- 驗收：`node --test tests/` 全綠；`node -e "import('./extension/lib/chart-buffer.js').then(m=>{const b=new m.ChartBuffer(3000);console.log(b.constructor.name)})"` 輸出 `ChartBuffer`。
+- [x] 完成紀錄：（待填）
+
+### [ ] Task 03: parseMemFrames ＋ features.js（MA/RSI/動量）（含測試）
+- 目標：依 Task 01 的 WS-NOTES 實作協定解析（純函式，Node 可測）；features 純數學（SMA/RSI14 Wilder/動量/区间%），對 expected fixture 容差 1e-9。
+- Target Files: `extension/lib/ws-parse.js`、`extension/lib/features.js`、`tests/ws-parse.test.mjs`、`tests/features.test.mjs`、fixtures。
+- 驗收：`node --test tests/` 全綠；`node scripts/parse-fixture.mjs tests/fixtures/ws-sample-1.txt` 复現 Task 01 同一斷言。
+- [x] 完成紀錄：（待填）
+
+### [ ] Task 04: state-builder.js（含 questions 常數與特徵開關）
+- 目標：snapshot＋features → §4.4 的 state JSON；`features:false` 時不出現 `features`；bars 截尾（預設 300）；token 估算函式 `estimateTokens(state)`。
+- Target Files: `extension/lib/state-builder.js`、`tests/state-builder.test.mjs`、`tests/fixtures/expected-state.json`。
+- 驗收：`node --test tests/` 全綠；`JSON.stringify(buildState(snap,{bars:300,features:true}))` 對 expected-state.json 深度相等（時間戳欄位正規化後）。
+- [x] 完成紀錄：（待填）
+
+### [ ] Task 05: jev-client.js（fetch＋退避重試＋錯誤正規化）
+- 目標：§4.4/§5 契約的實作；fetch 可注入（fake fetch 測試）；重試僅 429/529；錯誤 kind 齊全；任何輸出路徑不洩 key。
+- Target Files: `extension/lib/jev-client.js`、`tests/jev-client.test.mjs`、`tests/fixtures/jev-response-ok.json`、`tests/fixtures/jev-response-422.json`。
+- 驗收：`node --test tests/` 全綠；`node scripts/live-jev.mjs`（讀 `JEV_API_KEY` 環境變數，對 expected-state 打真 API）回 `direction`／`up_10_bars`／`trend_strength` 三答案與 usage。
+- [x] 完成紀錄：（待填）
+
+## Phase 2 — Extension 接線
+
+### [ ] Task 06: inject.js（world:MAIN ws 包裝）＋ content/bridge.js
+- 目標：§4.2 旁聽規則＋節流增量上送；重連/心跳；零改動 ws 行為。
+- Target Files: `extension/content/inject.js`、`extension/content/bridge.js`、（必要的 `registerContentScripts` 註冊碼進 SW 佔位）。
+- 驗收：`node --test tests/` 仍全綠（不得破壞 lib）；加載後人工/自動化檢查見 Task 09；pi 另產 `node scripts/static-check.mjs`（正則斷言：無 `send` 覆寫、有 origin 校驗、有 `v===1` 校驗）。
+- [x] 完成紀錄：（待填）
+
+### [ ] Task 07: service-worker 編排（registry、RUN_PREDICTION、PREDICTION_UPDATED）
+- 目標：§4.1 訊息協定的 SW 側完整實作；多 tab registry；predict 流程串 Task 03/04/05 模組。
+- Target Files: `extension/background/service-worker.js`。
+- 驗收：`node --test tests/` 全綠；`node scripts/static-check.mjs` 通過（SW 內無直接外網 fetch，僅 import jev-client）。
+- [x] 完成紀錄：（待填）
+
+### [ ] Task 08: Side Panel ＋ Options UI
+- 目標：F5/F6/F7。Panel 狀態機（idle/loading/done/error）、機率條、徽章、token 用量、原始 JSON 折疊、免責固定語；Options 的 key/model/bars/特徵開關。
+- Target Files: `extension/sidepanel/*`、`extension/options/*`。
+- 驗收：`node --test tests/` 全綠；HTML 通過 `node scripts/static-check.mjs`（無 inline script、無外部資源引用）。
+- [x] 完成紀錄：（待填）
+
+## Phase 3 — 端到端與收尾
+
+### [ ] Task 09: e2e 人工驗收（架構師＋使用者）
+- 目標：真實 Chrome 載入未封裝擴充 → 開 TV 圖表 → 按預測 → Panel 出結果。
+- 驗收清單（逐條打勾並記錄證據）：
+  1. 載入擴充無 manifest 錯誤；
+  2. 開 `tradingview.com/chart/…` 即自動抓 bar（SW console 可見 `bars>200`）；
+  3. 兩張不同符號分頁各自準確；
+  4. 按預測 3 秒內出結果；
+  5. 錯 key → 顯示 auth 中文提示；斷網 → offline 提示；
+  6. 成本估算顯示 ≤ $0.005/次；
+  7. `git grep` 無明文 key。
+- [x] 完成紀錄：（待填）
+
+### [ ] Task 10:（選做，可取捨）除錯增強
+- droppedFrames／各 series 計數進 debug 面板；ring log 最近 20 次預測；「重同步」按鈕（觸發 REQ_SNAPSHOT）。
+- [x] 完成紀錄：（待填）
+
+---
+
+## 依賴圖（串行順序）
+
+```
+01 → 02 → 03 → 04 → 05 → 06 → 07 → 08 → 09 → (10)
+```
+
+任何任務驗收失敗：根因編號寫進本檔該任務的「完成紀錄」，發最小修補 prompt（pi 用 `pi -c` 續接），不整模組重寫。
