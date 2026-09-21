@@ -61,12 +61,15 @@ if (mode === 'task06') {
 }
 
 if (mode === 'task07') {
-  const files = ['extension/background/service-worker.js'];
-  for (const f of files) {
+  for (const f of ['extension/background/service-worker.js', 'extension/lib/sw-core.js']) {
     const src = readFileSync(f, 'utf8');
     ok(!/fetch\s*\(\s*['"`]https:/.test(src), `${f}: 無直接外網 fetch（須經 lib/jev-client.js）`);
     ok(/import .*jev-client/.test(src), `${f}: 經 import jev-client 出口`);
   }
+  const core = readFileSync('extension/lib/sw-core.js', 'utf8');
+  ok(!/\bchrome\s*\./.test(core), 'sw-core: 零 chrome.*（DI 可測性）');
+  const sw = readFileSync('extension/background/service-worker.js', 'utf8');
+  ok(/createDb|sw-core/.test(sw) && /sidePanel/.test(sw), 'SW: 掛 sw-core 且設定 sidePanel 行為');
 }
 
 if (mode === 'task08') {

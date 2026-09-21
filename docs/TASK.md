@@ -62,7 +62,7 @@
   - pi 必要偏差核准：C3 globalThis 化外溢到 state-builder/jev-client 的 import 鏈（side-effect import＋globalThis 取值，零邏輯變動）——此為「lib 需同時跑 classic script 與 ESM」的必然結果，已回寫 ARCHITECTURE §4.6。
   - 原驗收命令的 `parse-fixture.mjs` 由 `verify-inject.mjs` 行為臺＋static-check 取代（TASK 本體已同步）。
 
-### [ ] Task 07: service-worker 編排（registry、RUN_PREDICTION、PREDICTION_UPDATED）
+### [-] Task 07: service-worker 編排（sw-core 可測核＋薄殼）→ pi（2026-09-21 派工中）
 - 目標：§4.1 訊息協定的 SW 側完整實作；多 tab registry；predict 流程串 Task 03/04/05 模組。
 - Target Files: `extension/background/service-worker.js`。
 - 驗收：`node --test tests/` 全綠；`node scripts/static-check.mjs` 通過（SW 內無直接外網 fetch，僅 import jev-client）。
