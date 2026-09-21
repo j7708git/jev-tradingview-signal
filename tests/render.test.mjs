@@ -204,6 +204,14 @@ test('errorMsg：未知 kind 顯示原文但先過 [redacted] 檢查', () => {
   assert.match(leak, /\[redacted\]/);
 });
 
+test('09e-2 門檻單一來源：globalThis.PREDICT_MIN_BARS=50，insufficient_data 用同一值', () => {
+  assert.equal(globalThis.PREDICT_MIN_BARS, 50);
+  const msg = errorMsg('insufficient_data');
+  assert.equal(msg, ERROR_MESSAGES.insufficient_data);
+  assert.match(msg, /K 棒不足/);
+  assert.match(msg, /50/);
+});
+
 test('renderError：中文訊息、kind 標籤、免責語', () => {
   const html = renderError('auth_401', 'ignored');
   assert.match(html, /API key 已被拒絕（401）/);

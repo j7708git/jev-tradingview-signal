@@ -3,6 +3,8 @@
 // 流程：GET_STATE（不帶 tabId，由 SW 的 lastActiveTabId 兜底）＋每 2s 輪詢；
 //       RUN_PREDICTION → 收 PREDICTION_UPDATED（只認自己 tab）驅動狀態機。
 
+// 09e-2：門檻單一來源（protocol.js side-effect 填充 globalThis，全案不得有第二份數字）。
+import '../lib/protocol.js';
 import {
   renderStatus,
   renderResult,
@@ -11,7 +13,7 @@ import {
 } from './render.js';
 
 const POLL_MS = 2000;
-const MIN_BARS_FOR_PREDICT = 10;
+const PREDICT_MIN_BARS = globalThis.PREDICT_MIN_BARS;
 const NEED_MORE_HINT =
   '請重新整理 TradingView 分頁或移動圖表讓資料流入';
 
@@ -85,12 +87,12 @@ function finishLoading() {
 
 function syncControls() {
   const count = Number(currentState && currentState.count) || 0;
-  const enough = count >= MIN_BARS_FOR_PREDICT;
+  const enough = count >= PREDICT_MIN_BARS;
   predictBtn.disabled = predicting || !enough;
   if (predicting) {
     hintEl.textContent = '';
   } else if (!enough) {
-    hintEl.textContent = NEED_MORE_HINT;
+    hintEl.textContent = `K 棒不足（${count}/${PREDICT_MIN_BARS}）· ${NEED_MORE_HINT}`;
   } else {
     hintEl.textContent = '';
   }
@@ -163,9 +165,16 @@ async function onPredict() {
     bindCopyButtons();
     return;
   }
-  if (response && response.error && response.result) {
+  if (response && response.error) {
+    // error 可能是字串（既有 kind）或物件（09e-1 insufficient_data）。
+    const error = response.error;
+    const kind = typeof error === 'string' ? error : error && error.kind;
+    const message =
+      typeof error === 'string'
+        ? response.result && response.result.message
+        : error && error.message;
     finishLoading();
-    resultEl.innerHTML = renderError(response.error, response.result.message);
+    resultEl.innerHTML = renderError(kind, message);
     return;
   }
   // 沒有直接回應時，交給 PREDICTION_UPDATED 廣播收尾。

@@ -18,13 +18,17 @@ const ok = (c, m) => { console.log((c ? 'PASS  ' : 'FAIL  ') + m); if (!c) fails
 const captured = [];
 const timers = [];
 class MockWS {
-  static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
   constructor(url) { MockWS.instances.push(this); this.url = url; this._l = {}; this.readyState = 1; }
   addEventListener(t, f) { (this._l[t] ||= []).push(f); }
   removeEventListener(t, f) { this._l[t] = (this._l[t] || []).filter(x => x !== f); }
   send(d) { (this.sent ||= []).push(d); }
   close() { this.closed = true; }
   dispatch(data) { for (const f of this._l.message || []) { try { f({ data }); } catch (e) { console.log('  (listener 拋錯: ' + e.message + ')'); } } }
+}
+// 真實 Chrome 語義：原生 WebSocket 的 CONNECTING/OPEN/... 是 prototype 上的 getter（唯讀）。
+// 子類上 `JevWebSocket.OPEN = 1` 直接賦值會拋 TypeError（inject.js Task 09 真機踩過的坑）。
+for (const [k, v] of [['CONNECTING', 0], ['OPEN', 1], ['CLOSING', 2], ['CLOSED', 3]]) {
+  Object.defineProperty(MockWS.prototype, k, { get: () => v });
 }
 MockWS.instances = [];
 const sandbox = {

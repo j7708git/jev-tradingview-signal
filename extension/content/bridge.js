@@ -53,7 +53,10 @@
   if (hasRuntime() && chrome.runtime.onMessage && chrome.runtime.onMessage.addListener) {
     chrome.runtime.onMessage.addListener(function (msg) {
       if (!msg || typeof msg !== 'object' || msg.type !== REQ_SNAPSHOT) return;
-      window.postMessage({ v: V, type: JEV_PING }, TV_ORIGIN);
+      // §4.7.2：full:true 要求 inject 清游標並全量重送；其餘維持增量補送。
+      var ping = { v: V, type: JEV_PING };
+      if (msg.full === true) ping.full = true;
+      window.postMessage(ping, TV_ORIGIN);
     });
   }
 })();

@@ -111,7 +111,13 @@ function classifyPayload(jsonTextOrObj, meta) {
         typeof body === 'object' &&
         typeof body.full_name === 'string'
       ) {
-        return { kind: 'meta', symbol: body.full_name };
+        // §4.2.1：`p[1]` 是 series 身分（sds_sym_1 主圖 / sds_sym_2 輔助 / ss_1 study）；
+        // 消費端靠 seriesRef 判斷是否為主圖符號來源。
+        return {
+          kind: 'meta',
+          symbol: body.full_name,
+          seriesRef: Array.isArray(p) ? p[1] : undefined,
+        };
       }
       return null;
     }

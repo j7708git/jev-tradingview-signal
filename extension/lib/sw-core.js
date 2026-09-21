@@ -7,7 +7,7 @@
 
 import './protocol.js';
 // protocol.js 為 classic-script 雙相容（無 export），符號掛在 globalThis。
-const { MSG, makeMessage, BAR_COLUMNS } = globalThis;
+const { MSG, makeMessage, BAR_COLUMNS, PREDICT_MIN_BARS } = globalThis;
 
 import { ChartBuffer as RealChartBuffer } from './chart-buffer.js';
 import {
@@ -17,7 +17,10 @@ import {
 import { JevError, evaluate as realEvaluate } from './jev-client.js';
 
 const MAX_BARS = 3000; // §4.3 滾動上限
-const MIN_BARS_FOR_PREDICT = 10; // 低於此值先向 tab 要補傳
+// 補傳觸發門檻：低於此值先向 tab 要補傳（§4.7.2）。與「能否預測」的
+// PREDICT_MIN_BARS（50，來自 protocol.js 單一來源）是兩件不同的事：
+// 這裡只是盡早觸發重同步；即使補傳後仍不足 50，會在 doPredict 拒絕預測。
+const RESYNC_MIN_BARS = 10;
 const DEFAULT_BARS = 300; // Options 未設定時的視窗根數
 const DEFAULT_MODEL = 'jev-latest';
 const DEFAULT_WAIT_MS = 800; // 等補傳的上限；逾時不致命
@@ -30,6 +33,8 @@ const GET_STATE = 'GET_STATE';
 const SET_ACTIVE_TAB = 'SET_ACTIVE_TAB';
 const ACTIVE_TAB_QUERY = 'ACTIVE_TAB_QUERY';
 const TEST_KEY = 'TEST_KEY';
+const GET_LAST_TAB = 'GET_LAST_TAB';
+const SESSION_LAST_TAB_KEY = 'lastActiveTabId'; // 儲存區 session 的鍵名
 
 // TEST_KEY 專用：極小固定 state（3 根範例 bar＋features:null）與最簡 direction 單題。
 // 刻意寫死、不走 state-builder（Options 的連線測試不需要真實圖表資料）。
@@ -91,6 +96,7 @@ export function createDb(deps = {}) {
   const runtime = deps.runtime;
   const tabs = deps.tabs;
   const storage = deps.storage;
+  const session = storage && storage.session ? storage.session : null;
   const evaluate = deps.evaluate || realEvaluate;
   const ChartBuffer = deps.ChartBuffer || RealChartBuffer;
   const buildState = deps.buildState || realBuildState;
@@ -100,6 +106,51 @@ export function createDb(deps = {}) {
   /** tabId → {buffer, meta, status, last, predicting, pending} */
   const registry = new Map();
   let activeTabId = null;
+  let activeLoaded = false;
+  let activeLoadPromise = null;
+
+  // ── lastActiveTabId 持久化（§4.7.3；lib 只經注入的 storage.session）──
+  async function loadActiveTab() {
+    if (activeLoaded) return activeTabId;
+    if (activeLoadPromise) return activeLoadPromise;
+    activeLoadPromise = (async () => {
+      try {
+        if (session && typeof session.get === 'function') {
+          const got = await session.get([SESSION_LAST_TAB_KEY]);
+          if (got && got[SESSION_LAST_TAB_KEY] != null && activeTabId == null) {
+            activeTabId = got[SESSION_LAST_TAB_KEY];
+          }
+        }
+      } catch {
+        /* 讀取失敗：降級為記憶體值，不得拋錯 */
+      }
+      activeLoaded = true;
+      return activeTabId;
+    })();
+    return activeLoadPromise;
+  }
+
+  function persistActiveTab() {
+    try {
+      if (session && typeof session.set === 'function') {
+        const p = session.set({ [SESSION_LAST_TAB_KEY]: activeTabId });
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      }
+    } catch {
+      /* 寫入失敗不致命 */
+    }
+  }
+
+  /** 由 content script 的 upsert 記錄當前圖表 tab（並持久化）。 */
+  function noteActiveTab(tabId) {
+    if (tabId === undefined || tabId === null) return;
+    if (activeTabId === tabId) return;
+    activeTabId = tabId;
+    persistActiveTab();
+  }
+
+  // SW 啟動即嘗試還原（不阻塞同步 API）。
+  void loadActiveTab();
 
   function ensureEntry(tabId) {
     let entry = registry.get(tabId);
@@ -138,7 +189,10 @@ export function createDb(deps = {}) {
 
   // ── SNAPSHOT_UPSERT ───────────────────────────────────────────────
   function handleUpsert(tabId, msg) {
+    const isFirstTouch = !registry.has(tabId);
     const entry = ensureEntry(tabId);
+    // §4.7.2(a)：本 SW 實例首次接觸此 tab → 主動要求全量歷史（不阻塞本訊息）。
+    if (isFirstTouch) void awaitSnapshot(tabId, entry, { full: true });
     if (msg.reset === true) entry.buffer.reset();
     entry.buffer.upsertBars(msg.bars);
     if (msg.meta && typeof msg.meta === 'object') {
@@ -150,7 +204,7 @@ export function createDb(deps = {}) {
   }
 
   // ── 等待補傳（REQ_SNAPSHOT → 下一次 upsert 或 waitMs 逾時）──────
-  function awaitSnapshot(tabId, entry) {
+  function awaitSnapshot(tabId, entry, opts = {}) {
     return new Promise((resolve) => {
       let done = false;
       const finish = () => {
@@ -162,10 +216,13 @@ export function createDb(deps = {}) {
         }
         resolve();
       };
+      // 已有 pending（例如首觸請求）先釋放，避免計時器洩漏。
+      if (entry.pending) entry.pending.finish();
       const timer = setTimeout(finish, waitMs);
       entry.pending = { finish, timer };
       try {
-        const p = tabs.sendMessage(tabId, makeMessage(MSG.REQ_SNAPSHOT));
+        const payload = opts.full === true ? { full: true } : undefined;
+        const p = tabs.sendMessage(tabId, makeMessage(MSG.REQ_SNAPSHOT, payload));
         if (p && typeof p.catch === 'function') p.catch(() => {});
       } catch {
         /* tab 已關或無 content script：等逾時即可 */
@@ -203,8 +260,19 @@ export function createDb(deps = {}) {
     const t0 = Date.now();
     let apiKey = '';
     try {
-      if (entry.buffer.count < MIN_BARS_FOR_PREDICT) {
-        await awaitSnapshot(tabId, entry);
+      if (entry.buffer.count < RESYNC_MIN_BARS) {
+        // §4.7.2(b)：根數不足 → 要求全量重送（沿用 waitMs，逾時不致命）。
+        await awaitSnapshot(tabId, entry, { full: true });
+      }
+      // 09e-1：等完（或未觸發補傳）後仍不足 PREDICT_MIN_BARS → 拒絕預測，
+      // 不得呼叫 evaluate（不消耗 API 額度），也不進行 buildState。
+      if (entry.buffer.count < PREDICT_MIN_BARS) {
+        const got = entry.buffer.count;
+        const message = `K 棒不足（目前 ${got} 根，需 ≥${PREDICT_MIN_BARS}）`;
+        entry.last = { status: 'error', kind: 'insufficient_data', message };
+        entry.status = 'error';
+        broadcast(MSG.PREDICTION_UPDATED, { tabId, state: 'error', status: 'error' });
+        return { ok: false, error: { kind: 'insufficient_data', message }, result: entry.last };
       }
       const opts = await readOptions();
       apiKey = typeof opts.jevApiKey === 'string' ? opts.jevApiKey : '';
@@ -288,6 +356,11 @@ export function createDb(deps = {}) {
     if (tabId === undefined || tabId === null) return { status: 'idle', count: 0 };
     const entry = registry.get(tabId);
     if (!entry) return { status: 'idle', count: 0 };
+    // 09e-3：SW 重啟後常見「首則訊息只有尾根」；若根數不足則主動要求全量重送
+    // （不阻塞回應；面板下一輪輪詢即恢復）。預測進行中不動用 pending 以免干擾。
+    if (!entry.predicting && entry.buffer.count < PREDICT_MIN_BARS) {
+      void awaitSnapshot(tabId, entry, { full: true });
+    }
     return {
       status: entry.status,
       count: entry.buffer.count,
@@ -301,6 +374,7 @@ export function createDb(deps = {}) {
   function setActiveTab(tabId) {
     if (tabId === undefined || tabId === null) return false;
     activeTabId = tabId;
+    persistActiveTab();
     return { v: 1, type: 'ACTIVE_TAB', tabId };
   }
 
@@ -322,6 +396,13 @@ export function createDb(deps = {}) {
           return setActiveTab(msg.tabId);
         case ACTIVE_TAB_QUERY:
           return { v: 1, type: ACTIVE_TAB_QUERY, tabId: activeTabId };
+        case GET_LAST_TAB:
+          // §4.7.3：SW 重啟後仍能回答；先確保 session 值已還原。
+          return loadActiveTab().then(() => ({
+            v: 1,
+            type: GET_LAST_TAB,
+            tabId: activeTabId,
+          }));
         case TEST_KEY:
           return testKey();
         default:
@@ -334,6 +415,7 @@ export function createDb(deps = {}) {
     if (senderTab.id === undefined || senderTab.id === null) return false;
     if (msg.type !== MSG.SNAPSHOT_UPSERT) return false;
     if (!isTvSender(sender)) return false;
+    noteActiveTab(senderTab.id);
     return handleUpsert(senderTab.id, msg);
   }
 

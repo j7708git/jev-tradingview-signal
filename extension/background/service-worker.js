@@ -5,7 +5,6 @@ import { evaluate } from '../lib/jev-client.js';
 import { buildState, QUESTIONS, estimateTokens } from '../lib/state-builder.js';
 import { ChartBuffer } from '../lib/chart-buffer.js';
 
-let lastActiveTabId = null;
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
 const db = createDb({
@@ -15,23 +14,54 @@ const db = createDb({
     get: (tabId) => chrome.tabs.get(tabId),
     query: (q) => chrome.tabs.query(q),
   },
-  storage: { local: { get: (keys) => chrome.storage.local.get(keys) } },
+  storage: {
+    local: { get: (keys) => chrome.storage.local.get(keys) },
+    // §4.7.3：lastActiveTabId 由 sw-core 經此介面持久化（lib 不碰 chrome.*）。
+    session: chrome.storage.session
+      ? {
+          get: (keys) => chrome.storage.session.get(keys),
+          set: (obj) => chrome.storage.session.set(obj),
+        }
+      : undefined,
+  },
   evaluate, ChartBuffer, buildState, QUESTIONS, estimateTokens,
 });
 
 const PANEL_CMDS = new Set(['GET_STATE', 'RUN_PREDICTION', 'SET_ACTIVE_TAB', 'TEST_KEY']);
 
+// 是否為本擴充的面板 UI（正式 side panel：sender.tab === undefined；以分頁開啟的
+// sidepanel/options 頁：sender.tab 有值但 sender.url 指向 chrome-extension://.../）。
+// 不可只靠 sender.tab，否則真機／自動化以分頁開啟的面板會被誤判為 content script。
+function fromPanel(sender) {
+  if (!sender || sender.tab === undefined) return true;
+  const url = sender.url || '';
+  const roots = [
+    chrome.runtime.getURL('sidepanel/'),
+    chrome.runtime.getURL('options/'),
+  ];
+  return roots.some((prefix) => url.startsWith(prefix));
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg?.type === 'SNAPSHOT_UPSERT' && sender?.tab?.id != null) lastActiveTabId = sender.tab.id;
-  if (msg?.v === 1 && msg.type === 'GET_LAST_TAB') {
-    sendResponse({ v: 1, type: 'GET_LAST_TAB', tabId: lastActiveTabId });
-    return false;
-  }
-  const patched =
-    sender?.tab === undefined && msg?.tabId == null && PANEL_CMDS.has(msg?.type)
-      ? { ...msg, tabId: lastActiveTabId }
-      : msg;
-  const result = db.handleRuntimeMessage(patched, sender);
+  const panel = fromPanel(sender);
+  // SW 層正規化：面板 sender 一律以 tab:undefined 傳給 sw-core，維持其 isPanel 契約。
+  const normalizedSender = panel ? { ...sender, tab: undefined } : sender;
+
+  const dispatch = async () => {
+    if (panel && msg?.tabId == null && PANEL_CMDS.has(msg?.type)) {
+      // §4.7.3：由 sw-core（含 storage.session 還原）取 lastActiveTabId 補 tabId。
+      const last = await db.handleRuntimeMessage(
+        { v: 1, type: 'GET_LAST_TAB' },
+        normalizedSender,
+      );
+      if (last && last.tabId != null) {
+        return db.handleRuntimeMessage({ ...msg, tabId: last.tabId }, normalizedSender);
+      }
+    }
+    return db.handleRuntimeMessage(msg, normalizedSender);
+  };
+
+  const result = dispatch();
   if (result && typeof result.then === 'function') {
     result.then(sendResponse, () => sendResponse({ ok: false, error: 'internal' }));
     return true;

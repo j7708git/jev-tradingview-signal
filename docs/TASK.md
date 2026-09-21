@@ -23,7 +23,7 @@
 
 ## Phase 1 — 純資料層（無浏览器依賴，pi 可全自動驗證）
 
-### [-] Task 02: 骨架＋lib/protocol.js＋lib/chart-buffer.js（含測試）→ pi（2026-09-21 派工中）
+### [x] Task 02: 骨架＋lib/protocol.js＋lib/chart-buffer.js（含測試）✅ 2026-09-21（pi）
 - 目標：專案骨架（見 ARCHITECTURE §3 目錄）、manifest 佔位可載入；protocol 常數與 ChartBuffer（upsert/滚动上限/snapshot）＋`node --test` 全綠。
 - Target Files: `extension/manifest.json`、`extension/lib/protocol.js`、`extension/lib/chart-buffer.js`、`tests/chart-buffer.test.mjs`、`tests/protocol.test.mjs`、`tests/fixtures/bars-300.json`、`package.json`（僅 scripts，無 dependencies）。
 - 驗收：`node --test tests/` 全綠；`node -e "import('./extension/lib/chart-buffer.js').then(m=>{const b=new m.ChartBuffer(3000);console.log(b.constructor.name)})"` 輸出 `ChartBuffer`。
@@ -68,15 +68,46 @@
 - 驗收：`node --test` 全綠；static-check task07（無直接外網 fetch、sw-core 零 chrome.*）；verify-inject 不回歸。
 - [x] 完成紀錄：**2026-09-21 pi 執行，架構師親驗全綠**（82/82＝67 零回歸＋15 新；task02/06/07 gates＋驗收臺全過；未碰 scripts/——上輪教訓生效，本輪 scope 完全乾淨）。備註核准：GET_STATE 等四個 panel 訊息型別未進 protocol.MSG（字串常數於 sw-core/殼，第二版可收斂）；`waitMs` dep 化（預設 800）為正當可測性設計；併發鎖 busy、非 TV sender 忽略、錯誤二次 redact 皆有測試。
 
-### [-] Task 08: Side Panel ＋ Options UI → pi（2026-09-21 派工中）
+### [x] Task 08: Side Panel ＋ Options UI ✅ 2026-09-21（pi，commit da675c8）
 - 目標：F5/F6/F7。Panel 狀態機（idle/loading/done/error）、機率條、徽章、token 用量、原始 JSON 折疊、免責固定語；Options 的 key/model/bars/特徵開關。
 - Target Files: `extension/sidepanel/*`、`extension/options/*`。
 - 驗收：`node --test tests/` 全綠；HTML 通過 `node scripts/static-check.mjs`（無 inline script、無外部資源引用）。
-- [x] 完成紀錄：（待填）
+- [x] 完成紀錄：**2026-09-21 pi 執行，架構師親驗全綠**（`node --test` 107/107；static-check task02/06/07/08 四 gate 全過；verify-inject 19/19 PASS）。架構師另以「真 app.js＋chrome stub」在真 Chrome（file:// 單檔拼接式試飛）驗證渲染：狀態列正確顯示 `圖表：BINANCE:BTCUSDT · 15 · 301 根 · buffer total 301`、預測鈕由 disabled→啟用、click 進 loading、Options 頁金鑰遮罩 `••••c123 (len=15)`＋模型/bars/特徵開關皆正確渲染、零 console 例外。
+
+### [x] Task 06fix: inject.js WebSocket 常數改 getter（真機根因修復）✅ 2026-09-21（pi，`pi -c` 續接）
+- 症狀：真機 `__JEV_HOOK=true` 但 `window.WebSocket` 仍為原生 → 包裝未生效。
+- 根因：`JevWebSocket.CONNECTING = NativeWS.CONNECTING` 等直接賦值——原生常數為唯讀（constructor 上 non-writable／部分環境為 prototype getter），strict 下拋 TypeError 使整段包裝中止（非 strict 則靜默遺失常數）。
+- 修法：改 `Object.defineProperty(JevWebSocket, name, { get(){ return name in NativeWS ? NativeWS[name] : NativeWS.prototype[name]; } })`，不賦值、維持唯讀語意、兩環境皆可見。
+- **驗收臺同步硬化**：`scripts/verify-inject.mjs` 的 MockWS 由「可寫 static 欄位」改為 prototype getter（＝真原生語意），修前會如實 FAIL、修後 PASS——避免假綠。
+- 真機複驗：`window.WebSocket` 非原生（`wsNative:false`），真 TradingView 頁實收 `SNAPSHOT_UPSERT`，首發 **300 根**（`reset:true`、`BINANCE:BTCUSDT`），後續尾根增量每則 1 根。
+
+### [x] Task 09fix: Side Panel 身分判準改用 sender.url ✅ 2026-09-21（pi，真機 e2e 揭出）
+- 症狀：面板以**分頁**開啟（chrome-extension://…/sidepanel/sidepanel.html）時永遠顯示「等待中」、預測鈕 disabled。
+- 根因：`isPanel` 以 `sender.tab === undefined` 判定；面板當分頁時 `sender.tab` 有值 → 被當成 content script → `msg.type !== SNAPSHOT_UPSERT` → 拒絕，訊息無回應（實測回 `undefined`、耗時 1ms）。正式 side panel 情境（sender.tab undefined）不受影響。
+- 修法：SW 層以 `sender.url` 是否屬本擴充 `sidepanel/`、`options/` 判定 fromPanel，成立時把 sender 正規化為 `{...sender, tab: undefined}` 再交給 sw-core（**不動 sw-core 公開契約**）。
+- 意義：正式用法行為不變，但面板在分頁／其他宿主下也能運作，且使自動化 e2e 得以覆蓋真 panel。
 
 ## Phase 3 — 端到端與收尾
 
-### [ ] Task 09: e2e 人工驗收（架構師＋使用者）
+### [x] Task 09c: reset 不丟資料＋全量重送＋SW 狀態持久化 ✅ 2026-09-21（pi）
+- 規格：`docs/ARCHITECTURE.md` §4.7（4.7.1–4.7.4）。
+- 真機根因：`series_loading` 的 reset 會清掉尚未 flush 的 300 根歷史（網路層取證：ws 上有 300／366 根的 `timescale_update`，inject 卻第一則就發空 reset、之後只有 n=1）；且 MV3 SW 被回收後記憶體狀態消失。
+- 實作：`inject.js` reset 只清 sent 游標（不再 `bars.clear()`）；`JEV_PING{full:true}` → 清游標＋`reset:true` 全量 flush；`bridge.js` 轉發 full 旗標；`sw-core.js` 在「首觸某 tab」與「buffer < MIN_BARS_FOR_PREDICT」時發 `REQ_SNAPSHOT{full:true}`、並把 `GET_LAST_TAB` 移入 core 以納入持久化；`service-worker.js` 用 `chrome.storage.session` 持久化 `lastActiveTabId`（讀寫失敗降級為記憶體值）。
+- 驗收：`node --test` **115/115**（109 基準＋6 新：reset 全量、full/非 full 差異、首觸即發全量請求、根數門檻、SW 重啟後 tabId 還在、session 失敗降級）；四 gate 全過；verify-inject 全過。
+
+### [x] Task 09f: 多 series 隔離（只有 sds_1 是主圖）✅ 2026-09-21（pi）
+- 完成紀錄：`protocol.js` 增 `globalThis.MAIN_SERIES_KEY='sds_1'`（單一來源）；`ws-parse.js` 的 `{kind:'meta'}` 補 `seriesRef`（=p[1]）；`inject.js` 加主序列過濾（bars/reset 只看 `sds_1`，meta 只認 `sds_sym_1`/`ss_1`，其餘丟棄並累加 `ignoredSeriesFrames`），`bars.clear()` 僅由主圖 symbol 變更觸發。`node --test` **124/124**（新增 fixture 真機重播：主圖恰 300 根、symbol=BINANCE:SOLUSDT、sds_2 的 366 根不入緩衝、sds_2 reset 不影響主圖）；四 gate 全 ALL PASS；verify-inject verdict PASS。
+- **架構師真機取證（本輪最重要發現）**：TV 在同一條 ws 上同時推送多個 series。用 `scratch/diag24.mjs` dump 95 幀（165KB）後離線重播（`scratch/replay-keys.mjs`）得到事件序列：
+  `reset/sds_1 → meta(sds_sym_1, BINANCE:SOLUSDT) → bars/sds_1(300) → reset/sds_2 → meta(sds_sym_2, INTERNAL:SEASONALS) → bars/sds_2(366) → … → meta(ss_1, BINANCE:SOLUSDT) → bars/sds_1(1) 尾根`
+- 兩個既有缺陷因此確認：① inject 把輔助序列 `sds_2` 的 366 根與主圖 300 根混進同一緩衝（**我先前看到的 666 根是污染狀態，不是成功**）；② 我 09d-2 派的「任何 symbol 變更就清緩衝」被 `INTERNAL:SEASONALS` 誤觸，直接清掉主圖 300 根 → 只剩 1 根（09d-2 為錯誤設計，已由 §4.2.1 取代）。
+- **更正紀錄**：Task09c 後那次「真機 7/7 PASS、666 根、做空 62%」的預測是在**污染資料**上跑的，該樣本作廢，不得當成通過證據；須在 09f 修完後以「緩衝 ≈300 根且全為主圖 bar」重跑。
+- 真機 fixture 已存證：`tests/fixtures/ws-multiseries-real.txt`。
+- 派工單：`docs/.prompt-task09f.txt`。
+### [x] Task 09d: resolution 讀取時機＋symbol 身分變更清緩衝 ✅ 2026-09-21（pi）
+- 09d-1（**誤判修正**）：我原先以為「網址 `interval=1`、state 卻報 15」是取樣不新鮮的缺陷。真機複查 TV 畫面週期鈕顯示 **15m** → **state 的 15 才是對的**，是 TV 自己在 SPA 期間把 URL 的 `interval` 參數寫成 1（TV 自身的 quirk），不是我們的 bug。pi 依工單把 resolution 改為 flush 當下讀 `location.search`（讀不到沿用舊值）——**保留為無害的加固**，但**不列為缺陷修復**。
+- 09d-2（真缺陷）：收到 `symbol_resolved` 且 symbol 與當前不同時做完整重置（`bars.clear()`＋`sent.clear()`＋pendingReset），修 SPA 切換標的時舊幣 bar 混入（vm 實測 merged=303）。整頁重載路徑實測乾淨（BTC 666 根 → ETH 300 根、無混幣）。
+
+### [-] Task 09: e2e 人工驗收（架構師＋使用者）— 進行中
 - 目標：真實 Chrome 載入未封裝擴充 → 開 TV 圖表 → 按預測 → Panel 出結果。
 - 驗收清單（逐條打勾並記錄證據）：
   1. 載入擴充無 manifest 錯誤；
@@ -86,7 +117,16 @@
   5. 錯 key → 顯示 auth 中文提示；斷網 → offline 提示；
   6. 成本估算顯示 ≤ $0.005/次；
   7. `git grep` 無明文 key。
-- [x] 完成紀錄：（待填）
+- [-] 進行中紀錄（2026-09-21，架構師親自）：
+  - **環境事實**：branded Chrome 153 已移除 `--load-extension`（實測 log：`--load-extension is not allowed in Google Chrome, ignoring.`，`DisableLoadExtensionCommandLineSwitch` flag 亦無效）→ 自動化改用 **Playwright 自帶 Chromium**（`%LOCALAPPDATA%\ms-playwright\chromium-1243`），`--load-extension` 有效、擴充真的載入（SW target 現身）。驗收腳本 `scripts/e2e-real-chrome.mjs`（架構師專用，pi 不得跑）。
+  - 過程中修掉四個真缺陷（全部先寫規格、派工修、架構師真機複驗）：
+    - **Task 06fix**：inject 的 ws 包裝被「唯讀常數賦值」中止 → 包裝從未生效。改 getter。
+    - **Task 09fix**：面板身分判準只看 `sender.tab` → 面板以分頁開啟時被誤判為 content script、訊息遭拒。改看 `sender.url`。
+    - **Task 09c**（關鍵）：真機實測「歷史從未送出」——ws 串流確有 `timescale_update` 300／366 根（網路層取證），但 inject 第一則發射竟是**空的 reset**，之後只有 1 根尾根；根因＝`series_loading`（reset）把尚未 flush 的歷史清掉（§4.7.1），加上 MV3 SW 生命週期讓記憶體狀態消失（§4.7.3）。修法：reset 只清 sent 游標不清 bar、`REQ_SNAPSHOT{full:true}` 全量重送、`lastActiveTabId` 存 `storage.session`。
+    - **Task 09d**：resolution 取樣不新鮮（網址 `interval=1` 卻報 15）＋SPA 切換 symbol 時舊幣 bar 殘留（vm 實測 merged=303）。
+  - **真機 e2e 結果（`scripts/e2e-real-chrome.mjs`，7/7 PASS）**：擴充載入無錯誤；金鑰寫入 `chrome.storage.local`；真 TradingView 圖表載入；Side Panel 狀態列 `圖表：BINANCE:BTCUSDT · 15 · 666 根 · buffer total 666`；預測鈕由 disabled→啟用；`RUN_PREDICTION` **ok:true／974ms（真 TypeSafe API）**；面板渲染 `做空 62% / 做多 17% / 觀望 21%｜未來 10 根上漲機率 52%｜趨勢強度 2.99｜17372 tokens · $0.0007 · jev-latest`。
+  - **切換標的複驗**：整頁重載切 ETHUSDT/5 → state `{count:300, symbol:BINANCE:ETHUSDT, resolution:"5"}`（乾淨，無混幣）。
+  - 待辦：09d 落地後複驗；清單 ③⑤⑥⑦（多分頁、錯 key、斷網、成本、`git grep` 無明文 key）；最後由使用者在自己 Chrome 以「載入未封裝」實測（見 `docs/TRY-IT.md`）。
 
 ### [ ] Task 10:（選做，可取捨）除錯增強
 - droppedFrames／各 series 計數進 debug 面板；ring log 最近 20 次預測；「重同步」按鈕（觸發 REQ_SNAPSHOT）。

@@ -3,6 +3,10 @@
 // 只把 entry.last（lib/sw-core.js 的形狀）轉成 HTML 字串，app.js 負責掛載與綁事件。
 // 可被 `node --test` 直接 import 斷言（tests/render.test.mjs）。
 
+// 09e-2：門檻單一來源（protocol.js 為雙相容無 export，靠 side-effect 填充 globalThis）。
+import '../lib/protocol.js';
+const PREDICT_MIN_BARS = globalThis.PREDICT_MIN_BARS;
+
 /** 底部常駐免責固定語（§5.5）。 */
 export const DISCLAIMER = '僅供研究參考，不構成投資建議';
 
@@ -39,6 +43,8 @@ export const ERROR_MESSAGES = {
   offline: '離線或防火牆擋了 api.typesafe.ai',
   bad_request_422: '請求格式被拒絕（422）',
   offhost: 'API 回應異常',
+  // 09e-1：資料不足被拒（門檻取自 protocol.js 單一來源）。
+  insufficient_data: `K 棒不足（需 ≥${PREDICT_MIN_BARS} 根）`,
 };
 
 /** HTML escape（JSON / 符號等不可信任字串一律先過）。 */

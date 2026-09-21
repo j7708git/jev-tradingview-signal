@@ -25,28 +25,53 @@
     typeof MSG !== 'undefined' && MSG && MSG.SNAPSHOT_UPSERT
       ? MSG.SNAPSHOT_UPSERT
       : 'SNAPSHOT_UPSERT';
+  // §4.2.1：主圖 series key 單一來源在 lib/protocol.js；這裡只讀取，不硬寫字面值。
+  var mainSeriesKey =
+    typeof MAIN_SERIES_KEY !== 'undefined' ? MAIN_SERIES_KEY : undefined;
+  // 可更新 meta.symbol 的主序列身分（sds_sym_1＝主圖 series、ss_1＝圖表 study 符號）。
+  var MAIN_SYMBOL_REFS = ['sds_sym_1', 'ss_1'];
+
+  function isMainSymbolRef(ref) {
+    return typeof ref === 'string' && MAIN_SYMBOL_REFS.indexOf(ref) !== -1;
+  }
 
   // 內部狀態
   var bars = new Map(); // time -> [t,o,h,l,c,v]
   var sent = new Map(); // time -> 已上送版本（增量游標）
   var symbol = null;
   var dropped = 0;
+  var ignoredSeriesFrames = 0; // §4.2.1：非主圖 series 丟棄的幀數
   var pendingReset = false;
   var emitTimer = null;
   var timeframeChecked = false;
+  var lastResolution = '1'; // 讀不到 interval 時沿用的上一次值
 
-  /** timeframe：TV 於 SPA 內同步改寫 URL，讀 `interval`（缺省 '1'）。 */
-  function readResolution() {
-    var search = (typeof location !== 'undefined' && location.search) || '';
-    var m = /[?&]interval=([^&]*)/.exec(search);
-    if (!m) return '1';
-    var v = m[1];
+  /**
+   * 09d-1：讀「當下」URL 的 interval；讀不到（或非 http(s) 頁面／無 search）回 null。
+   * 呼叫端負責沿用 lastResolution，值不得變成 undefined/null。
+   */
+  function readResolutionFresh() {
     try {
-      v = decodeURIComponent(v);
+      var search = (typeof location !== 'undefined' && location.search) || '';
+      var m = /[?&]interval=([^&]*)/.exec(search);
+      if (!m) return null;
+      var v = m[1];
+      try {
+        v = decodeURIComponent(v);
+      } catch (e) {
+        /* 保留原值 */
+      }
+      return v || null;
     } catch (e) {
-      /* 保留原值 */
+      return null;
     }
-    return v || '1';
+  }
+
+  /** timeframe：TV 於 SPA 內同步改寫 URL；每次呼叫都重讀，讀不到沿用上一次。 */
+  function readResolution() {
+    var fresh = readResolutionFresh();
+    if (fresh != null) lastResolution = fresh;
+    return lastResolution;
   }
 
   function barEquals(a, b) {
@@ -131,17 +156,42 @@
     }
 
     if (res.kind === 'bars') {
-      rememberBars(res.bars);
+      // §4.2.1：只有主圖 series 的 bar 進緩衝；其他 series 丢棄並計數。
+      if (res.seriesKey === mainSeriesKey) {
+        rememberBars(res.bars);
+      } else {
+        ignoredSeriesFrames += 1;
+      }
     } else if (res.kind === 'meta') {
-      symbol = res.symbol;
+      // §4.2.1：只有主序列身分（sds_sym_1 / ss_1）可更新 meta.symbol。
+      if (isMainSymbolRef(res.seriesRef)) {
+        var nextSymbol = res.symbol;
+        if (nextSymbol != null && symbol != null && nextSymbol !== symbol) {
+          // 只有「主圖」symbol 真的變更才完整重置（輔助序列造成的變更不得清缓衝）。
+          bars.clear();
+          sent.clear();
+          pendingReset = true;
+          schedule();
+        }
+        if (nextSymbol != null) symbol = nextSymbol;
+      } else {
+        ignoredSeriesFrames += 1;
+      }
     } else if (res.kind === 'control') {
       if (res.action === 'reset') {
-        bars.clear();
-        sent.clear();
-        pendingReset = true;
-        schedule();
+        // §4.2.1：只有 sds_1 的 reset 作用於主圖；sds_2+ 的 reset 完全無效。
+        if (res.seriesKey === mainSeriesKey) {
+          // §4.7.1：reset 只重置「已送出」游標，不得清除未送出的 bar。
+          sent.clear();
+          pendingReset = true;
+          schedule();
+        } else {
+          ignoredSeriesFrames += 1;
+        }
+      } else if (res.seriesKey !== mainSeriesKey) {
+        // 輔助序列的 streaming 控制訊號一律忽略並計數。
+        ignoredSeriesFrames += 1;
       }
-      // action:'streaming' 無需處理
     }
   }
 
@@ -221,19 +271,37 @@
         }
       }
     };
-    // 轉掛常數，避免頁面讀到 undefined。
-    JevWebSocket.CONNECTING = NativeWS.CONNECTING;
-    JevWebSocket.OPEN = NativeWS.OPEN;
-    JevWebSocket.CLOSING = NativeWS.CLOSING;
-    JevWebSocket.CLOSED = NativeWS.CLOSED;
+    // 常數（CONNECTING/OPEN/CLOSING/CLOSED）：原生為唯讀屬性（真機為 constructor 上
+    // 的 non-writable；部分環境只暴露在 prototype getter），直接賦值
+    // `JevWebSocket.OPEN = ...` 在 strict 下會拋 TypeError 並讓整段包裝中止
+    // （Task 09 真機根因）。改用「不賦值」的 getter：來源優先 constructor，
+    // 回退 prototype，兩種環境都可見且維持唯讀語意。
+    var WS_CONSTANTS = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
+    for (var ci = 0; ci < WS_CONSTANTS.length; ci += 1) {
+      (function (name) {
+        Object.defineProperty(JevWebSocket, name, {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return name in NativeWS ? NativeWS[name] : NativeWS.prototype[name];
+          },
+        });
+      })(WS_CONSTANTS[ci]);
+    }
     W.WebSocket = JevWebSocket;
   }
 
   // bridge.js 收到 SW 的 REQ_SNAPSHOT 後以 JEV_PING 喚醒，這裡立即 force-emit。
+  // §4.7.2：帶 full:true 時先清空已送出游標，立刻全量 flush（reset:true + 全部 bars）；
+  // 不帶 full 則維持既有增量補送行為。
   W.addEventListener('message', function (event) {
     if (event.source !== W) return;
     var data = event.data;
     if (!data || data.v !== 1 || data.type !== 'JEV_PING') return;
+    if (data.full === true) {
+      sent.clear();
+      pendingReset = true;
+    }
     flush();
   });
 })();

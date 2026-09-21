@@ -104,8 +104,8 @@ TradingView-Jev-Signal/
 - 包裝 `window.WebSocket` 為 Proxy 子類：僅當 `url` 符合 `/^wss:\/\/(.*\.)?tradingview\.com/` 才挂監聽 listener；其餘 ws 原樣放行。**絕不可改動 send/close/onmessage 的行為與返回值。**
 - 分幀：socket.io 文字分幀 `~m~<len>~m~<payload>`（一條 ws 訊息可串多幀）；`~h~<n>` 心跳丟棄。`parseFrames(text) → payloads[]`。
 - 消費規則（按 JSON payload 的 `m` 欄位分派）：
-  - `symbol_resolved` → 記 `meta.symbol = p[2].full_name`；
-  - `series_loading` 且 `p[1]` 以 `sds` 開頭 → **重置該 series 的 ChartBuffer**（換符號/週期/重連的統一信號）；
+  - `symbol_resolved` → `p[1]` 是 **series 身分**（實測 `sds_sym_1`＝主圖、`sds_sym_2`＝輔助序列、`ss_1`＝圖表 study 符號），`p[2].full_name` 才是符號。**只有主序列（`sds_sym_1` / `ss_1`）才更新 `meta.symbol`**；其餘（如 `sds_sym_2` → `INTERNAL:SEASONALS`）一律忽略。
+  - `series_loading` 且 `p[1]` 以 `sds` 開頭 → 重置**該 series 自己的**游標；**只有 `sds_1` 的 reset 才作用於主圖 ChartBuffer**（`sds_2+` 的 reset 不得動主圖緩衝）；
   - `timescale_update` → 取 `p[1][key]`（key 匹配 `/^sds_/`，實測為 `sds_1`）之 `s[]`：每條 `{i, v}`，**`v=[time,open,high,low,close,volume]`（time 為 epoch 秒）**，整段 upsert（實測一次 300 根，i=0..299）；同型但 `p[1]==={}` 者（未來刻度排程）丟棄；
   - `du` → 只取 `p[1]` 中 `/^sds_/` key 的 `s[]`（實測恆為尾根 `{i:299,v:[...]}`），upsert 覆寫；`st` 結尾的 study 鍵第二期前不消費；
   - 其餘（`qsd`、`*_completed`…）丟棄並計數（`droppedFrames` 進除錯面板）。
@@ -113,6 +113,31 @@ TradingView-Jev-Signal/
 - 第一期只消費「圖表自己已經請求的資料」：不主動發送任何自製訂閱幀。協定解析集中於 `lib/ws-parse.js` 的 `parseMemFrames`（名字沿用，回傳 `{seriesKey, bars, meta?, control:'load|complete'}`）；解析不了的幀靜默丟棄並計數。
 - 節流：每 2 秒最多一次 `SNAPSHOT_UPSERT`，只送**增量** bar（time > 上次已送最大 time，或尾根數值有變）。
 - 已知逃生門（預留介面，不实裝）：`seriesKey` 結構保留，供第二期主動發訂閱幀拉更深歷史或抓 study 值。
+
+#### 4.2.1 多 series：只有 `sds_1` 是主圖（Task 09f；2026-09-21 真機取證定案）
+
+真機抓幀（`tests/fixtures/ws-multiseries-real.txt`，95 幀／165KB 原始 bytes）證實同一條 ws 上會同時推送**不只一個 series**：
+
+```
+0  reset     key=sds_1                                   ← 主圖（我們要的）
+1  meta      p[1]=sds_sym_1  p[2].full_name=BINANCE:SOLUSDT
+2  bars      key=sds_1  n=300                            ← 主圖歷史
+3  streaming key=sds_1
+4  reset     key=sds_2                                   ← 輔助序列（不是我們的圖）
+5  meta      p[1]=sds_sym_2  p[2].full_name=INTERNAL:SEASONALS
+6  bars      key=sds_2  n=366                            ← 輔助序列的 bar
+8  reset     key=sds_2
+10 meta      p[1]=ss_1       p[2].full_name=BINANCE:SOLUSDT
+11+ bars     key=sds_1  n=1（尾根增量）
+```
+
+規則（違反即為資料污染，比缺資料更嚴重）：
+
+1. **主圖 series 恆為 `sds_1`**；`sds_2`、`sds_3`… 為輔助/衍生序列（TV 內部，如 `INTERNAL:SEASONALS`）。只消費 `sds_1` 的 `bars`／`du`；其餘 series 的資料一律丟棄並計數。
+2. **`symbol_resolved` 必須帶 series 身分**（`p[1]`）：只有 `sds_sym_1`（或圖表 `ss_1`）能改 `meta.symbol`；`sds_sym_2+` 一律忽略。
+3. **reset 依 series 作用**：`series_loading` 的 `p[1]` 為 seriesKey，只有 `sds_1` 的 reset 能重置主圖緩衝；輔助 series 的 reset 不得動主圖（09d-2「任何 symbol 變更即清緩衝」為**錯誤設計**，已由本節取代：只有**主圖** symbol 變更才清緩衝）。
+4. 解析器 `classifyPayload` 的 `{kind:'meta'}` 結果必須帶 `seriesRef`（`p[1]`），`{kind:'bars'|'control'}` 既有的 `seriesKey` 語意不變。
+5. **驗收基準**：真機 15m BTCUSDT 開圖後主圖緩衝應為 `300 + 尾根`（≈301–310），**永不為 666**（666 = 300 主圖 + 366 輔助序列，為污染狀態）。
 
 ### 4.3 ChartBuffer（lib/chart-buffer.js）
 
@@ -187,6 +212,24 @@ inject.js 與 bridge.js 一律**靜態宣告**於 manifest `content_scripts`（`
 ### 4.6 lib 模組載入模型（Task 06 定案）
 
 Chrome content script 是 classic script，`export` 語法不可用；同一批 lib 又要在 Node（ESM）裡被 unit test 與 SW import。定案：**`lib/protocol.js`、`lib/ws-parse.js` 探「無 export、`globalThis.X = X` 暴露」的雙相容寫法**；需要它倆的 ESM 檔（SW 鏈上的 state-builder/jev-client 等）一律 `import './protocol.js'`（side-effect，填充 globalThis）＋`const { X } = globalThis` 取值。**禁止**在雙相容檔使用 `export`；測試檔同側讀 globalThis，斷言邏輯不動。SW 本身仍為 `type: module`，可 import 有 export 的純 ESM 檔（features/state-builder/jev-client/chart-buffer 維持 ESM 即可，因其不進 content script 棧）。
+
+### 4.7 重同步與狀態持久化（Task 09c；真機 e2e 揭出的缺陷與規則）
+
+**真機觀測（Playwright Chromium + 本擴充，TradingView BINANCE:BTCUSDT）**：開圖後 30 秒內，SW 只收到 11 則 `SNAPSHOT_UPSERT`，**每一則都只有 1 根 bar**（尾根增量），**從未出現 300 根的初始歷史**；因此 SW 的 ChartBuffer 僅 1 根 < `MIN_BARS_FOR_PREDICT`，Side Panel 永遠顯示「等待中」、預測鈕 disabled。
+
+**根因（兩條，缺一不可）**
+
+1. **reset 與節流 flush 交錯**：TV 首屏會連續送 `series_loading`（→ buffer.reset()）與 `timescale_update`（300 根）。當 reset 落在「已寫入 buffer、尚未 flush」的節流窗內時，那批歷史被直接丟棄，下游再也拿不到。
+2. **MV3 SW 生命週期**：SW 被回收後，記憶體中的 ChartBuffer 與 `lastActiveTabId` 一併消失；重啟後只剩尾根，且不會自動回頭要歷史。
+
+**規則（實作必須滿足，違反即為缺陷）**
+
+- **4.7.1 reset 不得丟資料**：reset 只重置「已送出」游標，不清除未送出的 bar。任何 reset 之後的**第一次 flush 必須全量**（`reset:true`，且該則 bars 數 == flush 當下 buffer 內 bar 數）。
+- **4.7.2 全量重送**：`REQ_SNAPSHOT` 增加 `full:true` 參數。inject 收到後清空 sent 游標並**立即全量 flush**（`reset:true` + 當前全部 bars）。SW 必須在這兩種情況發 `REQ_SNAPSHOT{full:true}` 並等待其 upsert（沿用既有 `waitMs` 逾時語意，逾時不致命）：(a) SW 實例啟動後首次接觸某 tab；(b) 該 tab 目前 buffer 根數 < `MIN_BARS_FOR_PREDICT`。
+- **4.7.3 狀態持久化**：`lastActiveTabId` 以 `chrome.storage.session` 持久化（SW 只經已注入的 storage 介面讀寫，`lib/` 不得直接碰 chrome.*）。SW 重啟後仍須正確回答 `GET_LAST_TAB` 並補上 panel 訊息的 `tabId`。
+- **4.7.4 不變式**：SW 對某 tab 的 buffer 根數，不得因 reset 或 SW 重啟而掉到 1；正常情況下應等於該 tab 圖表歷史（受 §4.3 rolling 上限約束）。
+
+**真機驗收（架構師親跑，`scripts/e2e-real-chrome.mjs`）**：開 chart 後 30 秒內 SW 至少收到一則 `bars.length >= 50` 的 upsert；`GET_STATE.count >= 50` 且 Side Panel 狀態列顯示根數；`RUN_PREDICTION` 回 `ok:true`。
 
 ## 5. 安全規則
 

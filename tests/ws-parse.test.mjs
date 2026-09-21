@@ -109,12 +109,33 @@ test('classifyPayload: symbol_resolved → meta symbol', () => {
     m: 'symbol_resolved',
     p: ['cs_bqZ2Ww4OwPWV', 'sds_sym_1', { full_name: symbol }],
   });
-  assert.deepEqual(res, { kind: 'meta', symbol: 'BINANCE:BTCUSDT' });
+  assert.deepEqual(res, {
+    kind: 'meta',
+    symbol: 'BINANCE:BTCUSDT',
+    seriesRef: 'sds_sym_1',
+  });
 
   // 無 full_name → null
   assert.equal(
     classifyPayload({ m: 'symbol_resolved', p: ['cid', 'k', {}] }),
     null,
+  );
+});
+
+test('classifyPayload: symbol_resolved 帶 seriesRef（主圖 sds_sym_1 / 輔助 sds_sym_2 / study ss_1）', () => {
+  assert.deepEqual(
+    classifyPayload({
+      m: 'symbol_resolved',
+      p: ['cid', 'sds_sym_2', { full_name: 'INTERNAL:SEASONALS' }],
+    }),
+    { kind: 'meta', symbol: 'INTERNAL:SEASONALS', seriesRef: 'sds_sym_2' },
+  );
+  assert.deepEqual(
+    classifyPayload({
+      m: 'symbol_resolved',
+      p: ['cid', 'ss_1', { full_name: 'BINANCE:SOLUSDT' }],
+    }),
+    { kind: 'meta', symbol: 'BINANCE:SOLUSDT', seriesRef: 'ss_1' },
   );
 });
 
