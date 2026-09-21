@@ -1,6 +1,8 @@
 # TASK — jev-signal
 
 嚴格串行；一次只派一個。`[ ]` 待辦 / `[-]` 進行中 / `[x]` 完成。
+
+> **公開發佈（2026-09-22）**：<https://github.com/j7708git/jev-tradingview-signal>（public，MIT）。`docs/.prompt-task*.txt`（派工單）與 `scratch/`（診斷工具）列在 `.gitignore`，不隨公開發佈；本機絕對路徑已去識別化。
 派工對象預設 **pi**（`pi -p`），驗收命令一律在專案根的 git-bash 可執行。
 
 > ⚠ 本專案與一般 web 專案的差異：Task 01 是**取證 spike**，由架構師親自在真實 Chrome＋TradingView 執行（需要登陸狀態的瀏覽器），pi 無法代替。pi 的派工從 Task 02 開始。
