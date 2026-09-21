@@ -1,7 +1,7 @@
 # TASK — jev-signal
 
 嚴格串行；一次只派一個。`[ ]` 待辦 / `[-]` 進行中 / `[x]` 完成。
-派工對象預設 **pi**（`pi -p`），驗收命令一律在專案根 `D:/Agent開發項目工作區/Typesafe_Jev/jev-signal` 的 git-bash 可執行。
+派工對象預設 **pi**（`pi -p`），驗收命令一律在專案根的 git-bash 可執行。
 
 > ⚠ 本專案與一般 web 專案的差異：Task 01 是**取證 spike**，由架構師親自在真實 Chrome＋TradingView 執行（需要登陸狀態的瀏覽器），pi 無法代替。pi 的派工從 Task 02 開始。
 

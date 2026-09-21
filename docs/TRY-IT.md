@@ -9,8 +9,8 @@
 
 | 項目 | 內容 |
 | --- | --- |
-| 擴充資料夾 | `D:\Agent開發項目工作區\Typesafe_Jev\jev-signal\extension` |
-| TypeSafe API key | 在 `D:\Agent開發項目工作區\Typesafe_Jev\jev-proxy\.env` 的 `JEV_API_KEY`（**別貼進聊天室、別 commit**） |
+| 擴充資料夾 | 本專案 clone 下來的 `<專案根>\extension`（例：`C:\dev\jev-tradingview-signal\extension`） |
+| TypeSafe API key | 在 <https://console.typesafe.ai> 申請後貼到擴充設定頁；若你另有 `jev-proxy` 之類的既有設定，key 也存在它的 `.env`（**別貼進聊天室、別 commit**） |
 | 帳號 | TradingView 免費帳號即可（未登入也能看到圖，但免費方案延遲較高） |
 
 ---
