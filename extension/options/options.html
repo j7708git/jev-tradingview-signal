@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Jev Signal 設定</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="page">
+      <h1 class="title">Jev Signal 設定</h1>
+      <p class="lead">
+        API key 只儲存在此瀏覽器的擴充儲存區，且僅會送至 api.typesafe.ai。
+      </p>
+
+      <section class="card">
+        <div class="field">
+          <label class="label" for="jevApiKey">TypeSafe API Key</label>
+          <div class="key-row">
+            <input
+              id="jevApiKey"
+              name="jevApiKey"
+              class="input"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="貼上 API key"
+            />
+            <button id="toggle-key" class="ghost" type="button">顯示</button>
+          </div>
+          <div id="key-hint" class="key-hint"></div>
+        </div>
+
+        <div class="field">
+          <label class="label" for="jevModel">模型</label>
+          <select id="jevModel" name="jevModel" class="input">
+            <option value="jev-latest">jev-latest</option>
+            <option value="jev-preview">jev-preview</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label class="label" for="bars">送出的 K 棒數量（50–1000）</label>
+          <input
+            id="bars"
+            name="bars"
+            class="input"
+            type="number"
+            min="50"
+            max="1000"
+            step="1"
+            value="300"
+          />
+        </div>
+
+        <div class="field checkbox-field">
+          <input id="featuresOn" name="featuresOn" type="checkbox" checked />
+          <label for="featuresOn">附加派生特徵（MA20/50、RSI14、動量）</label>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button id="save" class="primary" type="button">儲存</button>
+        <button id="test" class="secondary" type="button">測試連線</button>
+      </div>
+      <div id="test-msg" class="test-msg"></div>
+
+      <p class="disclaimer">僅供研究參考，不構成投資建議</p>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

@@ -19,7 +19,7 @@ const db = createDb({
   evaluate, ChartBuffer, buildState, QUESTIONS, estimateTokens,
 });
 
-const PANEL_CMDS = new Set(['GET_STATE', 'RUN_PREDICTION', 'SET_ACTIVE_TAB']);
+const PANEL_CMDS = new Set(['GET_STATE', 'RUN_PREDICTION', 'SET_ACTIVE_TAB', 'TEST_KEY']);
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === 'SNAPSHOT_UPSERT' && sender?.tab?.id != null) lastActiveTabId = sender.tab.id;

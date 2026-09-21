@@ -62,13 +62,13 @@
   - pi 必要偏差核准：C3 globalThis 化外溢到 state-builder/jev-client 的 import 鏈（side-effect import＋globalThis 取值，零邏輯變動）——此為「lib 需同時跑 classic script 與 ESM」的必然結果，已回寫 ARCHITECTURE §4.6。
   - 原驗收命令的 `parse-fixture.mjs` 由 `verify-inject.mjs` 行為臺＋static-check 取代（TASK 本體已同步）。
 
-### [-] Task 07: service-worker 編排（sw-core 可測核＋薄殼）→ pi（2026-09-21 派工中）
+### [x] Task 07: service-worker 編排（sw-core 可測核＋薄殼）✅ 2026-09-21（pi）
 - 目標：§4.1 訊息協定的 SW 側完整實作；多 tab registry；predict 流程串 Task 03/04/05 模組。
-- Target Files: `extension/background/service-worker.js`。
-- 驗收：`node --test tests/` 全綠；`node scripts/static-check.mjs` 通過（SW 內無直接外網 fetch，僅 import jev-client）。
-- [x] 完成紀錄：（待填）
+- Target Files: `extension/lib/sw-core.js`（架構師核准新增：邏輯與 chrome.* 分層）、`extension/background/service-worker.js`、`tests/sw-core.test.mjs`。
+- 驗收：`node --test` 全綠；static-check task07（無直接外網 fetch、sw-core 零 chrome.*）；verify-inject 不回歸。
+- [x] 完成紀錄：**2026-09-21 pi 執行，架構師親驗全綠**（82/82＝67 零回歸＋15 新；task02/06/07 gates＋驗收臺全過；未碰 scripts/——上輪教訓生效，本輪 scope 完全乾淨）。備註核准：GET_STATE 等四個 panel 訊息型別未進 protocol.MSG（字串常數於 sw-core/殼，第二版可收斂）；`waitMs` dep 化（預設 800）為正當可測性設計；併發鎖 busy、非 TV sender 忽略、錯誤二次 redact 皆有測試。
 
-### [ ] Task 08: Side Panel ＋ Options UI
+### [-] Task 08: Side Panel ＋ Options UI → pi（2026-09-21 派工中）
 - 目標：F5/F6/F7。Panel 狀態機（idle/loading/done/error）、機率條、徽章、token 用量、原始 JSON 折疊、免責固定語；Options 的 key/model/bars/特徵開關。
 - Target Files: `extension/sidepanel/*`、`extension/options/*`。
 - 驗收：`node --test tests/` 全綠；HTML 通過 `node scripts/static-check.mjs`（無 inline script、無外部資源引用）。

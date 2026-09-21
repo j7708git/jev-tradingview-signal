@@ -7,7 +7,7 @@
 
 import './protocol.js';
 // protocol.js 為 classic-script 雙相容（無 export），符號掛在 globalThis。
-const { MSG, makeMessage } = globalThis;
+const { MSG, makeMessage, BAR_COLUMNS } = globalThis;
 
 import { ChartBuffer as RealChartBuffer } from './chart-buffer.js';
 import {
@@ -29,6 +29,30 @@ const TV_CHART_RE = /^https:\/\/([a-z0-9-]+\.)*tradingview\.com\/chart(\/|$)/i;
 const GET_STATE = 'GET_STATE';
 const SET_ACTIVE_TAB = 'SET_ACTIVE_TAB';
 const ACTIVE_TAB_QUERY = 'ACTIVE_TAB_QUERY';
+const TEST_KEY = 'TEST_KEY';
+
+// TEST_KEY 專用：極小固定 state（3 根範例 bar＋features:null）與最簡 direction 單題。
+// 刻意寫死、不走 state-builder（Options 的連線測試不需要真實圖表資料）。
+const TEST_KEY_STATE = {
+  symbol: 'TEST',
+  resolution: '1',
+  generatedAt: '1970-01-01T00:00:00+00:00',
+  barsWindow: 3,
+  columns: BAR_COLUMNS,
+  bars: [
+    [0, 1, 2, 0.5, 1.5, 100],
+    [60, 1.5, 2.5, 1, 2, 110],
+    [120, 2, 3, 1.5, 2.5, 120],
+  ],
+  features: null,
+};
+const TEST_KEY_QUESTIONS = {
+  direction: {
+    type: 'choice',
+    instructions: 'Is the price more likely to rise or fall over the next bars?',
+    criteria: { long: 'rise', neutral: 'flat', short: 'fall' },
+  },
+};
 
 /** sender 的來源網址是否為 TV 圖表頁（優先用 sender.url，其次 sender.tab.url）。 */
 function isTvSender(sender) {
@@ -231,6 +255,28 @@ export function createDb(deps = {}) {
     }
   }
 
+  // ── TEST_KEY（panel/options 來源）───────────────────────────────
+  // 守「外呼單點」：Options 不必自己 fetch；成功回 {ok:true}，失敗回 {ok:false, kind}。
+  async function testKey() {
+    const opts = await readOptions();
+    const apiKey = typeof opts.jevApiKey === 'string' ? opts.jevApiKey : '';
+    const model = opts.jevModel || DEFAULT_MODEL;
+    try {
+      await evaluate({
+        apiKey,
+        model,
+        state: TEST_KEY_STATE,
+        questions: TEST_KEY_QUESTIONS,
+      });
+      return { ok: true };
+    } catch (err) {
+      let kind = 'offhost';
+      if (err instanceof JevError) kind = err.kind;
+      else if (err && typeof err.kind === 'string') kind = err.kind;
+      return { ok: false, kind };
+    }
+  }
+
   function runPrediction(tabId) {
     if (tabId === undefined || tabId === null) return { ok: false, error: 'no_tab' };
     const entry = ensureEntry(tabId);
@@ -276,6 +322,8 @@ export function createDb(deps = {}) {
           return setActiveTab(msg.tabId);
         case ACTIVE_TAB_QUERY:
           return { v: 1, type: ACTIVE_TAB_QUERY, tabId: activeTabId };
+        case TEST_KEY:
+          return testKey();
         default:
           return false;
       }

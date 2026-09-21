@@ -1,6 +1,6 @@
 // scripts/static-check.mjs — 架構守門（Task 02+ 通用驗收工具，架構師維護）
 // 用法: node scripts/static-check.mjs task02 | task06 | task07 | task08
-import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const mode = process.argv[2] || 'task02';
@@ -76,8 +76,13 @@ if (mode === 'task08') {
   for (const f of ['extension/sidepanel/sidepanel.html', 'extension/options/options.html']) {
     const src = readFileSync(f, 'utf8');
     ok(!/<script(?![^>]*src=)/.test(src), `${f}: 無 inline script`);
-    ok(!/https?:\/\/(?!www\.tradingview\.com|api\.typesafe\.ai)/.test(src.replace(/<\/?html[^>]*>/g,'')), `${f}: 無外部資源引用`);
+    ok(!/https?:\/\//.test(src.replace(/<\/?html[^>]*>/g, '').replace(/xmlns="[^"]*"/g, '')), `${f}: 無外部資源引用`);
   }
+  const jsAll = ['extension/sidepanel/app.js', 'extension/options/app.js', 'extension/sidepanel/render.js', 'extension/options/render.js']
+    .filter(f => existsSync(f)).map(f => readFileSync(f, 'utf8')).join('\n');
+  ok(/\bfetch\s*\(/.test(jsAll) === false, 'panel/options JS: 零 fetch（一律經 SW，TEST_KEY 走 runtime message）');
+  ok(/chrome\.storage\.local\.(get|set)/.test(jsAll), 'options: 經 storage.local 讀寫設定');
+  ok(/僅供研究參考/.test(jsAll + readFileSync('extension/sidepanel/sidepanel.html', 'utf8')), '免責語常駐');
 }
 
 console.log(fails.length === 0 ? `\nALL PASS (${mode})` : `\n${fails.length} FAILED (${mode})`);

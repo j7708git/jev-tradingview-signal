@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Jev Signal</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header class="top">
+      <h1 class="brand">Jev Signal</h1>
+      <div id="status-line" class="status-line">圖表：等待中</div>
+    </header>
+
+    <main class="main">
+      <button id="predict-btn" class="primary" type="button" disabled>預測</button>
+      <p id="hint" class="hint"></p>
+      <section id="result" class="result" aria-live="polite"></section>
+    </main>
+
+    <footer class="footer">
+      <p class="disclaimer">僅供研究參考，不構成投資建議</p>
+    </footer>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

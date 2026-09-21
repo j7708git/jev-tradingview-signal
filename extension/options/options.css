@@ -1,0 +1,202 @@
+/* options.css — 簡潔深色中性主題，全本地 CSS 變數，無外部資源。 */
+:root {
+  --bg: #14161a;
+  --bg-elev: #1c1f25;
+  --bg-elev-2: #23272f;
+  --border: #2e333d;
+  --text: #e6e8ec;
+  --text-dim: #9aa0aa;
+  --text-faint: #6b7280;
+  --accent: #4c8bf5;
+  --ok: #2fbf71;
+  --err: #e5534b;
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft JhengHei",
+    "PingFang TC", sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.page {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 32px 20px 48px;
+}
+
+.title {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.lead {
+  margin: 0 0 20px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.card {
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.input {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.key-row {
+  display: flex;
+  gap: 8px;
+}
+
+.key-row .input {
+  flex: 1 1 auto;
+}
+
+.key-hint {
+  color: var(--text-faint);
+  font-size: 12px;
+  font-family: ui-monospace, Consolas, monospace;
+  min-height: 16px;
+}
+
+.checkbox-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.primary,
+.secondary,
+.ghost {
+  padding: 9px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.primary:hover {
+  filter: brightness(1.08);
+}
+
+.secondary {
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+
+.secondary:hover {
+  border-color: var(--accent);
+}
+
+.ghost {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  padding: 9px 12px;
+  white-space: nowrap;
+}
+
+.ghost:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.test-msg {
+  margin-top: 12px;
+  min-height: 20px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.test-msg.ok {
+  color: var(--ok);
+}
+
+.test-msg.err {
+  color: var(--err);
+}
+
+.disclaimer {
+  margin: 28px 0 0;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%) translateY(12px);
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
