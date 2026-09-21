@@ -100,12 +100,19 @@
 - **架構師真機取證（本輪最重要發現）**：TV 在同一條 ws 上同時推送多個 series。用 `scratch/diag24.mjs` dump 95 幀（165KB）後離線重播（`scratch/replay-keys.mjs`）得到事件序列：
   `reset/sds_1 → meta(sds_sym_1, BINANCE:SOLUSDT) → bars/sds_1(300) → reset/sds_2 → meta(sds_sym_2, INTERNAL:SEASONALS) → bars/sds_2(366) → … → meta(ss_1, BINANCE:SOLUSDT) → bars/sds_1(1) 尾根`
 - 兩個既有缺陷因此確認：① inject 把輔助序列 `sds_2` 的 366 根與主圖 300 根混進同一緩衝（**我先前看到的 666 根是污染狀態，不是成功**）；② 我 09d-2 派的「任何 symbol 變更就清緩衝」被 `INTERNAL:SEASONALS` 誤觸，直接清掉主圖 300 根 → 只剩 1 根（09d-2 為錯誤設計，已由 §4.2.1 取代）。
-- **更正紀錄**：Task09c 後那次「真機 7/7 PASS、666 根、做空 62%」的預測是在**污染資料**上跑的，該樣本作廢，不得當成通過證據；須在 09f 修完後以「緩衝 ≈300 根且全為主圖 bar」重跑。
-- 真機 fixture 已存證：`tests/fixtures/ws-multiseries-real.txt`。
-- 派工單：`docs/.prompt-task09f.txt`。
+- **更正紀錄**：Task09c 後那次「真機 7/7 PASS、666 根、做空 62%」的預測是在**污染資料**上跑的，該樣本作廢，不得當成通過證據；已在 09f 修完後以「緩衝 300 根且全為主圖 bar」重跑取代。
+- 真機 fixture 已存證：`tests/fixtures/ws-multiseries-real.txt`；派工單：`docs/.prompt-task09f.txt`。
+- **架構師親驗（真機 e2e 8/8 PASS）**：`圖表：BINANCE:BTCUSDT · 15 · 300 根 · buffer total 300`（新增反污染斷言：根數須在 250–400，666 視為失敗）；`RUN_PREDICTION ok:true` 1000ms、17373 tokens、$0.0007；DOM 渲染 做空/做多/觀望、未來10根上漲機率 55%、趨勢強度 3.32。
+- **資料真實性交叉核對**：送進 API 的 state 300 根，最後一根 close **85,343.86** vs TV 畫面即時價 **85,355.40**（同一根進行中的 15m bar）；首末根時距 269,100 秒 = 299×900 → 恰為 300 根 15 分鐘 K 棒。
+
+### [x] Task 09e: 資料不足拒預測＋門檻單一來源＋GET_STATE 觸發重同步 ✅ 2026-09-21（pi）
+- 背景：真機 e2e 揭出「SW 冷啟動後緩衝只剩 1 根，卻照樣呼叫 TypeSafe API」，回傳 觀望 91%／趨勢強度 0.06 這種垃圾（會被誤讀成訊號）。
+- 實作：`PREDICT_MIN_BARS = 50` 集中在 `lib/protocol.js`（單一來源，panel 與 sw-core 共用）；等完全量重送後仍 < 50 根 → 回 `{ok:false, err:'insufficient_data'}` 且**不呼叫 API**；`GET_STATE` 於根數不足時觸發全量重送（面板可自行恢復）。`node --test` 120/120。
+- 真機複驗：資料不足時 3ms 回 `insufficient_data`、0 token；資料足夠時正常預測（見 09f 驗收）。
+
 ### [x] Task 09d: resolution 讀取時機＋symbol 身分變更清緩衝 ✅ 2026-09-21（pi）
 - 09d-1（**誤判修正**）：我原先以為「網址 `interval=1`、state 卻報 15」是取樣不新鮮的缺陷。真機複查 TV 畫面週期鈕顯示 **15m** → **state 的 15 才是對的**，是 TV 自己在 SPA 期間把 URL 的 `interval` 參數寫成 1（TV 自身的 quirk），不是我們的 bug。pi 依工單把 resolution 改為 flush 當下讀 `location.search`（讀不到沿用舊值）——**保留為無害的加固**，但**不列為缺陷修復**。
-- 09d-2（真缺陷）：收到 `symbol_resolved` 且 symbol 與當前不同時做完整重置（`bars.clear()`＋`sent.clear()`＋pendingReset），修 SPA 切換標的時舊幣 bar 混入（vm 實測 merged=303）。整頁重載路徑實測乾淨（BTC 666 根 → ETH 300 根、無混幣）。
+- 09d-2（**已被 §4.2.1 取代**）：原設計「收到 `symbol_resolved` 且 symbol 與當前不同即完整重置」。真機證明此判準錯誤——輔助序列（`INTERNAL:SEASONALS`）的 `symbol_resolved` 會誤觸，清掉主圖資料。正確規則：只有**主圖**（`sds_sym_1`/`ss_1`）symbol 變更才清緩衝。
 
 ### [-] Task 09: e2e 人工驗收（架構師＋使用者）— 進行中
 - 目標：真實 Chrome 載入未封裝擴充 → 開 TV 圖表 → 按預測 → Panel 出結果。
