@@ -32,8 +32,9 @@ if (mode === 'task02') {
   ok(mf.background?.service_worker === 'background/service-worker.js' && mf.background.type === 'module',
      'manifest: ESM service worker');
   ok(mf.content_scripts?.[0]?.world === 'MAIN' && mf.content_scripts[0].run_at === 'document_start'
-     && mf.content_scripts[0].js?.includes('content/inject.js'),
-     'content_scripts[0]: inject.js @ world:MAIN @ document_start');
+     && mf.content_scripts[0].js?.at(-1) === 'content/inject.js'
+     && mf.content_scripts[0].js?.includes('lib/protocol.js') && mf.content_scripts[0].js?.includes('lib/ws-parse.js'),
+     'content_scripts[0]: MAIN 棧 protocol→ws-parse→inject @ document_start');
   ok(mf.content_scripts?.[1]?.js?.includes('content/bridge.js') && mf.content_scripts[1].world !== 'MAIN',
      'content_scripts[1]: bridge.js @ isolated（預設）');
   ok(mf.content_scripts[0].matches?.[0] === 'https://www.tradingview.com/chart/*' && mf.action, 'manifest: matches + action 存在');
@@ -45,12 +46,18 @@ if (mode === 'task02') {
 }
 
 if (mode === 'task06') {
-  const src = readFileSync('extension/content/inject.js', 'utf8');
-  ok(!/\.send\s*=|prototype\.send/.test(src), 'inject: 未覆寫 WebSocket.prototype.send / .send');
-  ok(/event\.source\s*===\s*window/.test(src), 'inject: postMessage 校驗 event.source===window');
-  ok(/['"]https:\/\/www\.tradingview\.com['"]/.test(src) || /origin/.test(src), 'inject: origin 校驗存在');
-  ok(/__JEV_HOOK/.test(src), 'inject: 冪等旗標存在');
-  ok(/v\s*[:=]\s*1|PROTOCOL_VERSION/.test(src), 'inject: 協議版本欄位');
+  const inj = readFileSync('extension/content/inject.js', 'utf8');
+  const brg = readFileSync('extension/content/bridge.js', 'utf8');
+  ok(!/\.send\s*=|prototype\.send/.test(inj), 'inject: 未覆寫 WebSocket send');
+  ok(!/\bfetch\s*\(/.test(inj + brg), 'inject/bridge: 零 fetch（外呼只准在 SW 經 jev-client）');
+  ok(/__JEV_HOOK/.test(inj), 'inject: 冪等旗標');
+  ok(/location\.origin/.test(inj), 'inject: 出站 postMessage 帶精確 targetOrigin');
+  ok(/parseFrames|classifyPayload/.test(inj), 'inject: 復用 ws-parse 而非自行解析');
+  ok(/v\s*[:=]\s*1|PROTOCOL_VERSION/.test(inj), 'inject: 協議版本欄位');
+  ok(!/^(import|export)\b/m.test(inj) || /const/.test(inj), 'inject: 無 ESM import（classic script）');
+  ok(/event\.source\s*===?\s*window/.test(brg), 'bridge: 校驗 event.source===window');
+  ok(/['"]https:\/\/www\.tradingview\.com['"]/.test(brg), 'bridge: 校驗 origin 常量');
+  ok(/chrome\.runtime\.onMessage/.test(brg), 'bridge: 收 SW 指令');
 }
 
 if (mode === 'task07') {

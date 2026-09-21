@@ -3,7 +3,9 @@
 // 純 ESM，不得引用 chrome.* 或任何瀏覽器 API；零依賴，可直接在 Node import。
 // 對應 docs/ARCHITECTURE.md §4.3（ChartBuffer）與 §4.4（systemone 請求 contract）。
 
-import { BAR_COLUMNS } from './protocol.js';
+import './protocol.js';
+// protocol.js 為 classic-script 雙相容（無 ESM export）；符號掛在 globalThis。
+const { BAR_COLUMNS } = globalThis;
 import { computeFeatures } from './features.js';
 
 const DEFAULT_BARS = 300;

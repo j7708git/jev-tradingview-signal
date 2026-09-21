@@ -184,6 +184,10 @@ TradingView-Jev-Signal/
 
 inject.js 與 bridge.js 一律**靜態宣告**於 manifest `content_scripts`（`world:'MAIN'` / `run_at:'document_start'` 直接支援，見 §4.5）→ 命中 matches 即保證先於頁面建 ws。不使用 `chrome.scripting` 動態註冊（多一條權限、多一套注釋、且無 injectImmediately 等價物流）。Task 01 取證用 CDP 導航級注入＝靜態宣告之時序等價路徑，結論直接適用。（原「經 registerContentScripts 註冊」之表述作廢；`permissions` 移除 `scripting`。）
 
+### 4.6 lib 模組載入模型（Task 06 定案）
+
+Chrome content script 是 classic script，`export` 語法不可用；同一批 lib 又要在 Node（ESM）裡被 unit test 與 SW import。定案：**`lib/protocol.js`、`lib/ws-parse.js` 探「無 export、`globalThis.X = X` 暴露」的雙相容寫法**；需要它倆的 ESM 檔（SW 鏈上的 state-builder/jev-client 等）一律 `import './protocol.js'`（side-effect，填充 globalThis）＋`const { X } = globalThis` 取值。**禁止**在雙相容檔使用 `export`；測試檔同側讀 globalThis，斷言邏輯不動。SW 本身仍為 `type: module`，可 import 有 export 的純 ESM 檔（features/state-builder/jev-client/chart-buffer 維持 ESM 即可，因其不進 content script 棧）。
+
 ## 5. 安全規則
 
 1. API key 只存 `chrome.storage.local`（Options 輸入，password input，顯示僅掩碼）；**只允許**在 `lib/jev-client.js` 內讀取並在 fetch 瞬間成 header。原因：單點管控，audit 只 grep 一處。

@@ -53,11 +53,14 @@
 
 ## Phase 2 — Extension 接線
 
-### [ ] Task 06: inject.js（world:MAIN ws 包裝）＋ content/bridge.js
+### [x] Task 06: inject.js（world:MAIN ws 包裝）＋ content/bridge.js ✅ 2026-09-21（pi）
 - 目標：§4.2 旁聽規則＋節流增量上送；重連/心跳；零改動 ws 行為。
 - Target Files: `extension/content/inject.js`、`extension/content/bridge.js`（manifest 已靜態宣告兩檔，無需 registerContentScripts 代碼）。
-- 驗收：`node --test tests/` 仍全綠（不得破壞 lib）；`node scripts/static-check.mjs task06`（正則斷言：無 `send` 覆寫、有 origin 校驗、有版本欄校驗、冪等旗標）；加載後人工/自動化檢查見 Task 09。
-- [x] 完成紀錄：（待填）
+- 驗收：`node --test` 全綠；`node scripts/verify-inject.mjs` verdict PASS；`node scripts/static-check.mjs task06` ALL PASS；加載後真機檢查見 Task 09。
+- [x] 完成紀錄：**2026-09-21 pi 執行，架構師親驗全綠**（`node --test` 67/67；**verify-inject 驗收臺 19/19 verdict PASS**——以 Task 01 真實幀餵進 inject：301 根、與金標逐值一致（1 根差異＝du 尾根刷新屬預期）、非 TV 連線零消費、send/close 透傳、series_loading 重置＋符號更新全對；static-check task02/task06 ALL PASS）。
+  - 返修/治理記錄：pi 為讓驗收臺通過**擅自修復了已 commit 的證據檔**（ws-evidence-btc-1m.json 截斷 p 補尾）→ 架構師判定違反「證據檔不可變」→ `git checkout HEAD` 还原，改為硬化驗收臺（toPayload 對 WS-NOTES §6 已知截斷以 regex 復建），還原後重跑仍 verdict PASS。
+  - pi 必要偏差核准：C3 globalThis 化外溢到 state-builder/jev-client 的 import 鏈（side-effect import＋globalThis 取值，零邏輯變動）——此為「lib 需同時跑 classic script 與 ESM」的必然結果，已回寫 ARCHITECTURE §4.6。
+  - 原驗收命令的 `parse-fixture.mjs` 由 `verify-inject.mjs` 行為臺＋static-check 取代（TASK 本體已同步）。
 
 ### [ ] Task 07: service-worker 編排（registry、RUN_PREDICTION、PREDICTION_UPDATED）
 - 目標：§4.1 訊息協定的 SW 側完整實作；多 tab registry；predict 流程串 Task 03/04/05 模組。

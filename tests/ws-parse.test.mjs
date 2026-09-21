@@ -4,7 +4,10 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { parseFrames, classifyPayload } from '../extension/lib/ws-parse.js';
+// lib 為 classic-script 雙相容（無 ESM export，符號掛在 globalThis）；此處以 side-effect 載入後取用。
+import '../extension/lib/ws-parse.js';
+
+const { parseFrames, classifyPayload } = globalThis;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const fixture = (name) =>

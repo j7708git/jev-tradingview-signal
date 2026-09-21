@@ -1,13 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
+// lib 為 classic-script 雙相容（無 ESM export，符號掛在 globalThis）；此處以 side-effect 載入後取用。
+import '../extension/lib/protocol.js';
+
+const {
   PROTOCOL_VERSION,
   BAR_COLUMNS,
   MSG,
   TV_WS_URL_RE,
   makeMessage,
-} from '../extension/lib/protocol.js';
+} = globalThis;
 
 test('PROTOCOL_VERSION 為 1', () => {
   assert.equal(PROTOCOL_VERSION, 1);

@@ -9,7 +9,9 @@ import {
   buildState,
   estimateTokens,
 } from '../extension/lib/state-builder.js';
-import { BAR_COLUMNS } from '../extension/lib/protocol.js';
+import '../extension/lib/protocol.js';
+// protocol.js 為 classic-script 雙相容（無 ESM export）；符號掛在 globalThis。
+const { BAR_COLUMNS } = globalThis;
 import { computeFeatures } from '../extension/lib/features.js';
 
 // 固定測試時區，讓 generatedAt（本地偏移）在任一主機上皆可重現。

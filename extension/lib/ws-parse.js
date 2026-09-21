@@ -1,5 +1,6 @@
+// Classic-script compatible: globals via globalThis; Node tests import the file and read globalThis.
 // lib/ws-parse.js — TradingView socket.io 分幀與 §4.2 消費規則（純函式）
-// 純 ESM，不得引用 chrome.* 或任何瀏覽器 API；零依賴，可直接在 Node import。
+// 不得引用 chrome.* 或任何瀏覽器 API；零依賴，可直接在 Node import。
 // 規格來源：docs/WS-NOTES.md（實測協定）＋ docs/ARCHITECTURE.md §4.2。
 
 const SDS_PREFIX_RE = /^sds_/;
@@ -15,7 +16,7 @@ const HEARTBEAT_RE = /^~h~(\d+)/;
  * @param {string} rawText
  * @returns {string[]} 每個 frame 的 payload 本體（未解析 JSON）
  */
-export function parseFrames(rawText) {
+function parseFrames(rawText) {
   if (typeof rawText !== 'string' || !rawText.startsWith('~m~')) return [];
 
   const out = [];
@@ -51,6 +52,7 @@ export function parseFrames(rawText) {
 
   return out;
 }
+globalThis.parseFrames = parseFrames;
 
 /**
  * 依 §4.2 把單一 payload 分派成結構化結果。
@@ -65,7 +67,7 @@ export function parseFrames(rawText) {
  *   - `{kind:'ignore', m?}`
  *   - `null`（不消費 / 解析不了）
  */
-export function classifyPayload(jsonTextOrObj, meta) {
+function classifyPayload(jsonTextOrObj, meta) {
   let root = jsonTextOrObj;
   if (typeof root === 'string') {
     try {
@@ -135,6 +137,7 @@ export function classifyPayload(jsonTextOrObj, meta) {
       return null;
   }
 }
+globalThis.classifyPayload = classifyPayload;
 
 /** timescale_update：p[1] 內找 `/^sds_/` key 的非空 `s[]`。 */
 function classifySeriesBars(p, m) {

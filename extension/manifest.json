@@ -15,7 +15,7 @@
   "content_scripts": [
     {
       "matches": ["https://www.tradingview.com/chart/*"],
-      "js": ["content/inject.js"],
+      "js": ["lib/protocol.js", "lib/ws-parse.js", "content/inject.js"],
       "run_at": "document_start",
       "world": "MAIN"
     },
