@@ -135,7 +135,7 @@
 - 作法：`systemone` 題目把 `trend_strength` 換成 `bull_trend`＋`bear_trend`（皆 `score`、同 5 級 criteria），面板渲染兩列並保留舊 `trend_strength` 的相容分支。規格：`docs/ARCHITECTURE.md` §4.4、`docs/PRD.md` 問題組合（三題→四題）。
 - 驗收：`node --test` **130/130**；四 gate 全過；verify-inject PASS；**真機 e2e 8/8 PASS**：`多頭趨勢強度 2.59 ｜ 空頭趨勢強度 0.78`（真實 TypeSafe 回應，1009ms、17551 tokens、$0.0007）。
 
-### [-] Task 09: e2e 人工驗收（架構師＋使用者）— 進行中
+### [x] Task 09: e2e 人工驗收（架構師＋使用者）✅ 2026-09-22 使用者實測通過
 - 目標：真實 Chrome 載入未封裝擴充 → 開 TV 圖表 → 按預測 → Panel 出結果。
 - 驗收清單（逐條打勾並記錄證據）：
   1. 載入擴充無 manifest 錯誤；
@@ -152,9 +152,13 @@
     - **Task 09fix**：面板身分判準只看 `sender.tab` → 面板以分頁開啟時被誤判為 content script、訊息遭拒。改看 `sender.url`。
     - **Task 09c**（關鍵）：真機實測「歷史從未送出」——ws 串流確有 `timescale_update` 300／366 根（網路層取證），但 inject 第一則發射竟是**空的 reset**，之後只有 1 根尾根；根因＝`series_loading`（reset）把尚未 flush 的歷史清掉（§4.7.1），加上 MV3 SW 生命週期讓記憶體狀態消失（§4.7.3）。修法：reset 只清 sent 游標不清 bar、`REQ_SNAPSHOT{full:true}` 全量重送、`lastActiveTabId` 存 `storage.session`。
     - **Task 09d**：resolution 取樣不新鮮（網址 `interval=1` 卻報 15）＋SPA 切換 symbol 時舊幣 bar 殘留（vm 實測 merged=303）。
-  - **真機 e2e 結果（`scripts/e2e-real-chrome.mjs`，7/7 PASS）**：擴充載入無錯誤；金鑰寫入 `chrome.storage.local`；真 TradingView 圖表載入；Side Panel 狀態列 `圖表：BINANCE:BTCUSDT · 15 · 666 根 · buffer total 666`；預測鈕由 disabled→啟用；`RUN_PREDICTION` **ok:true／974ms（真 TypeSafe API）**；面板渲染 `做空 62% / 做多 17% / 觀望 21%｜未來 10 根上漲機率 52%｜趨勢強度 2.99｜17372 tokens · $0.0007 · jev-latest`。
+  - **真機 e2e 最終結果（`scripts/e2e-real-chrome.mjs`，8/8 PASS；2026-09-22 09g/09h 後）**：擴充載入無錯誤；金鑰寫入 `chrome.storage.local`；真 TradingView 圖表載入；Side Panel 狀態列 `圖表：BINANCE:BTCUSDT · 15 · 300 根 · buffer total 300`（含反污染斷言）；預測鈕由 disabled→啟用；`RUN_PREDICTION` **ok:true／1009ms（真 TypeSafe API）**；面板渲染 `做多 36% / 做多 57% / 觀望 31% / 做空 12%｜未來 10 根上漲機率 53%｜多頭趨勢強度 2.59｜空頭趨勢強度 0.78｜17551 tokens · $0.0007 · jev-latest`。
+    - ⚠️ 更早一筆「7/7 PASS／666 根／趨勢強度 2.99」為**污染狀態**下的觀測（666 = 主圖 300＋輔助序列 366，且趨勢強度為舊單題版），已作廢，見 Task 09f 更正紀錄。
+  - **站內切換標的複驗（09g 後）**：`{count:300, symbol:BINANCE:BTCUSDT}` → 站內切換 → `{count:300, symbol:BINANCE:ETHUSDT}`（無混幣、符號即時更新）。
+  - **清單狀態**：①②③④⑥⑦已驗（③=不同分頁各自準確、⑥=實測 $0.0007/次 ≈ NT$0.02、⑦=`git grep` 無明文長 token 且未追蹤 `.env`）；⑤（錯 key／斷網的中文提示）僅經單元測試覆蓋，未在真機手動觸發。
+  - **使用者手動實測（2026-09-22）**：回報「做得不錯」= 通過。使用者實測中另抓出兩個問題（站內換商品符號不更新＝真缺陷已修 09g；趨勢強度拆分＝需求變更已做 09h）。
   - **切換標的複驗**：整頁重載切 ETHUSDT/5 → state `{count:300, symbol:BINANCE:ETHUSDT, resolution:"5"}`（乾淨，無混幣）。
-  - 待辦：09d 落地後複驗；清單 ③⑤⑥⑦（多分頁、錯 key、斷網、成本、`git grep` 無明文 key）；最後由使用者在自己 Chrome 以「載入未封裝」實測（見 `docs/TRY-IT.md`）。
+  - 待辦（2026-09-22 收尾後）：清單⑤（錯 key／斷網的中文提示）尚未真機手動觸發（單元測試已覆蓋）。其餘 ①②③④⑥⑦ 已驗。
 
 ### [ ] Task 10:（選做，可取捨）除錯增強
 - droppedFrames／各 series 計數進 debug 面板；ring log 最近 20 次預測；「重同步」按鈕（觸發 REQ_SNAPSHOT）。
