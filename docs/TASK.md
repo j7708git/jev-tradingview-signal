@@ -184,10 +184,13 @@
 - 驗收：證明「名稱＋參數＋逐根數值」三者皆可得，或記錄不可得項的降級方案。
 - [x] 完成紀錄：**2026-09-22 架構師 browser-harness 真機取證（BTCUSDT 15m，BB30/ALMA25/ALMA90/VRVP/Vol/CMF20/BarSet 七研究），四未知數全數定案**——①身分/參數在**上行 create_study 明文**（pineId＋in_*／具名參數；Pine 原始碼加密但不需解密）；②`st`＝完整逐根序列＋尾根增量、`v=[epoch秒,...1–4值]`、時間對齊 bars；③built-in 全可辨識、自訂 Pine 有 pineId、非時序型（VRVP）st 恆空自動排除；④studyId 由 client 存 layout 跨 reload 穩定（7 個中 6 個不變，唯一換號為 TV 內部 BarSet）→ `studyNameMap` 主鍵＝studyId、fallback＝pineId|in_* 簽章。證據：`tests/fixtures/ws-studies-real.txt`＋WS-NOTES §7。
 
-### [ ] Task 13: study 消費實作（ws-parse/inject/sw-core/state-builder）
+### [x] Task 13: study 消費實作（ws-parse/inject/sw-core/state-builder）✅ 2026-09-22（pi）
 - 依 Task 12 定案契約派 pi；state.studies 對齊 `bars` 窗口，`name` 取 `studyNameMap` 覆寫值（無覆寫用自動名稱）、`rawName` 保留；未掛指標 `studies:[]` 零回歸。
+- [x] 完成紀錄：**2026-09-22 pi 執行（終端 420s 上限把最終報告切掉，但實作與測試全數寫入），架構師直接驗收全綠**：`npm test` **178/178**（152＋26 新，fail 0）、static-check task02/06/07/08 全 ALL PASS、verify-inject verdict PASS、邊界乾淨（僅准許 12 檔＋架構師 2 docs，1277 行新增；未碰 scripts/、sidepanel、manifest）。
+  - 交付：inject 包 ws.send 只讀觀察消費 create_study（pineId＋in_*/具名參數，text 加密 blob 丟棄）＋du study 逐根 upsert（time 為 key、負 sentinel i 忽略、st 空自動排除、symbol 完整重置連動清序列）；新訊息 STUDIES_UPSERT（meta+patches+gone）；sw-core entry.studies（每 study 3000 根）；state-builder `buildStudies`（bars 窗口逐位對齊、缺值 null、nameMap 覆寫→Pine 縮寫＋首參數 fallback 鏈、columns v1..vn、無指標 `[]`）。
+  - fixture 實測：`ws-studies-real.txt` 7 個 create_study 全解析、BarSet（yl9zbk）無 st 值自動排除、redact 斷言 text 零殘留。
 
-### [ ] Task 14: Panel 呈現 studies＋真機 e2e 驗收
+### [-] Task 14: Panel 呈現 studies＋真機 e2e 驗收🔄 2026-09-22 派工 pi（UI 部分）
 - Panel 指標名稱映射 UI（F10）：動態輸入框、預設＝自動偵測名稱、失焦即存、持久化；＋payload/結果區顯示附帶指標；真機掛指標圖 e2e；成本複驗 ≤$0.005/次。
 
 ---

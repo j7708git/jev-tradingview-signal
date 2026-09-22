@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   QUESTIONS,
   buildState,
+  buildStudies,
   estimateTokens,
 } from '../extension/lib/state-builder.js';
 import '../extension/lib/protocol.js';
@@ -166,4 +167,146 @@ test('欄位數非 6 的根被過濾並產生 warnings；正常時無 warnings �
   assert.equal(state.warnings[0].includes('bar[300]'), true);
 
   assert.equal('warnings' in buildState(snapshot(), { now: NOW }), false);
+});
+
+// ─────────────────────────────────────────────────────────────
+// Task 13／§4.4：buildStudies（state.studies 陣列）
+// ─────────────────────────────────────────────────────────────
+
+function studyRec(meta, entries) {
+  return { meta, series: new Map(entries) };
+}
+
+const ALMA_META = {
+  scriptName: 'Script@tv-scripting-101!',
+  pineId: 'STD;Arnaud%1Legoux%1Moving%1Average',
+  params: { in_0: 25, in_1: 0.85, in_2: 6 },
+};
+
+test('buildStudies: 與 bars 窗口逐根對齊，缺值根補 null，columns 通用 v1..', () => {
+  const bars = [
+    [1000, 1, 1, 1, 1, 1],
+    [1060, 2, 2, 2, 2, 2],
+    [1120, 3, 3, 3, 3, 3],
+  ];
+  const studies = new Map([
+    ['51IoAU', studyRec(ALMA_META, [[1000, [1.5]], [1120, [3.5]]])],
+  ]);
+
+  const out = buildStudies(studies, { bars });
+  assert.equal(out.length, 1);
+  const s = out[0];
+  assert.equal(s.id, '51IoAU');
+  assert.equal(s.rawName, 'Arnaud Legoux Moving Average');
+  assert.equal(s.name, 'ALMA(25)');
+  assert.deepEqual(s.params, { in_0: 25, in_1: 0.85, in_2: 6 });
+  assert.deepEqual(s.columns, ['time', 'v1']);
+  assert.deepEqual(s.values, [[1000, 1.5], null, [1120, 3.5]]);
+});
+
+test('buildStudies: nameMap 覆寫優先；rawName 仍保留自動全名', () => {
+  const bars = [[1000, 1, 1, 1, 1, 1]];
+  const studies = new Map([
+    ['51IoAU', studyRec(ALMA_META, [[1000, [9]]])],
+  ]);
+  const out = buildStudies(studies, {
+    bars,
+    nameMap: { '51IoAU': '我的自訂均線' },
+  });
+  assert.equal(out[0].name, '我的自訂均線');
+  assert.equal(out[0].rawName, 'Arnaud Legoux Moving Average');
+});
+
+test('buildStudies: fallback 鏈 — Pine 縮寫＋首參數；直給型用 scriptName', () => {
+  const bars = [[1000, 1, 1, 1, 1, 1]];
+  const studies = new Map([
+    [
+      'a',
+      studyRec(
+        { pineId: 'STD;Arnaud%1Legoux%1Moving%1Average', params: { in_0: 90 } },
+        [[1000, [1]]],
+      ),
+    ],
+    [
+      'b',
+      studyRec(
+        { scriptName: 'Volume@tv-basicstudies-277', params: { length: 20 } },
+        [[1000, [2]]],
+      ),
+    ],
+    ['c', studyRec({ pineId: 'STD;Bollinger_Bands', params: { in_0: 30 } }, [[1000, [3]]])],
+  ]);
+
+  const out = buildStudies(studies, { bars });
+  const byId = Object.fromEntries(out.map((s) => [s.id, s]));
+  assert.equal(byId.a.name, 'ALMA(90)');
+  assert.equal(byId.b.name, 'Volume(20)');
+  assert.equal(byId.c.name, 'BB(30)');
+  assert.equal(byId.b.rawName, 'Volume');
+});
+
+test('buildStudies: 縮寫優先取首個數值參數（字串來源在前也一樣）', () => {
+  const bars = [[1000, 1, 1, 1, 1, 1]];
+  const studies = new Map([
+    [
+      'x',
+      studyRec(
+        { scriptName: 'X', params: { source: 'close', length: 14 } },
+        [[1000, [1]]],
+      ),
+    ],
+  ]);
+  const out = buildStudies(studies, { bars });
+  assert.equal(out[0].name, 'X(14)');
+});
+
+test('buildStudies: 多值指標 columns v1..v3，短列補 null', () => {
+  const bars = [
+    [1000, 1, 1, 1, 1, 1],
+    [1060, 2, 2, 2, 2, 2],
+  ];
+  const studies = new Map([
+    [
+      'bb',
+      studyRec(
+        { pineId: 'STD;Bollinger_Bands', params: { in_0: 30 } },
+        [
+          [1000, [1, 2, 3]],
+          [1060, [4]], // 罕見短列 → 補 null
+        ],
+      ),
+    ],
+  ]);
+  const out = buildStudies(studies, { bars });
+  assert.deepEqual(out[0].columns, ['time', 'v1', 'v2', 'v3']);
+  assert.deepEqual(out[0].values, [
+    [1000, 1, 2, 3],
+    [1060, 4, null, null],
+  ]);
+});
+
+test('buildStudies: 未掛指標／空序列 → []，且不拋錯', () => {
+  assert.deepEqual(buildStudies(new Map(), { bars: [] }), []);
+  assert.deepEqual(buildStudies(undefined), []);
+  assert.deepEqual(buildStudies(null, {}), []);
+  assert.deepEqual(
+    buildStudies(new Map([['x', studyRec({}, [])]]), {
+      bars: [[1, 1, 1, 1, 1, 1]],
+    }),
+    [],
+  );
+  // 壞型別也不炸
+  assert.deepEqual(buildStudies(42, { bars: null }), []);
+});
+
+test('buildStudies: 同窗口缺值根補 null（與 state.bars 窗口逐位對齊）', () => {
+  const state = buildState(snapshot(), { bars: 50, features: false, now: NOW });
+  const times = state.bars.map((b) => b[0]);
+  const studies = new Map([
+    ['s', studyRec({ scriptName: 'X' }, [[times[49], [7]]])],
+  ]);
+  const out = buildStudies(studies, { bars: state.bars });
+  assert.equal(out[0].values.length, 50);
+  assert.deepEqual(out[0].values[49], [times[49], 7]);
+  for (let i = 0; i < 49; i += 1) assert.equal(out[0].values[i], null);
 });

@@ -13,11 +13,14 @@ const { MSG, makeMessage, BAR_COLUMNS, PREDICT_MIN_BARS, COST_USD_PER_MTOK } =
 import { ChartBuffer as RealChartBuffer } from './chart-buffer.js';
 import {
   buildState as realBuildState,
+  buildStudies as realBuildStudies,
   QUESTIONS as realQuestions,
 } from './state-builder.js';
 import { JevError, evaluate as realEvaluate } from './jev-client.js';
 
 const MAX_BARS = 3000; // §4.3 滾動上限
+// Task 13：每個 study 序列上限（超出丟最舊，只影響記憶體）。
+const MAX_STUDY_BARS = 3000;
 // 補傳觸發門檻：低於此值先向 tab 要補傳（§4.7.2）。與「能否預測」的
 // PREDICT_MIN_BARS（50，來自 protocol.js 單一來源）是兩件不同的事：
 // 這裡只是盡早觸發重同步；即使補傳後仍不足 50，會在 doPredict 拒絕預測。
@@ -120,6 +123,7 @@ export function createDb(deps = {}) {
   const evaluate = deps.evaluate || realEvaluate;
   const ChartBuffer = deps.ChartBuffer || RealChartBuffer;
   const buildState = deps.buildState || realBuildState;
+  const buildStudies = deps.buildStudies || realBuildStudies;
   const QUESTIONS = deps.QUESTIONS || realQuestions;
   const waitMs = Number.isFinite(deps.waitMs) ? deps.waitMs : DEFAULT_WAIT_MS;
 
@@ -180,6 +184,8 @@ export function createDb(deps = {}) {
       entry = {
         buffer: new ChartBuffer(MAX_BARS),
         meta: { symbol: undefined, resolution: undefined },
+        // Task 13：studyId → {meta, series: Map<time, vals>}；symbol 完整重置時僅清 series。
+        studies: new Map(),
         status: 'idle',
         last: null,
         predicting: false,
@@ -211,6 +217,81 @@ export function createDb(deps = {}) {
   }
 
   // ── SNAPSHOT_UPSERT ───────────────────────────────────────────────
+  /** Task 13：清空所有 study 序列，保留身分 meta（symbol 完整重置語意）。 */
+  function clearStudySeries(entry) {
+    if (!entry || !(entry.studies instanceof Map)) return;
+    entry.studies.forEach((rec) => {
+      if (rec && rec.series instanceof Map) rec.series.clear();
+    });
+  }
+
+  /** Task 13：study 序列超過上限時丟最舊（依 time 升冪）。 */
+  function evictStudy(series, max) {
+    if (!(series instanceof Map) || series.size <= max) return;
+    const times = [...series.keys()].sort((a, b) => a - b);
+    const excess = series.size - max;
+    for (let i = 0; i < excess; i += 1) series.delete(times[i]);
+  }
+
+  /** Task 13：只保留 {scriptName, pineId?, params?}，避免任意鍵（含敏感值）進入 state。 */
+  function sanitizeStudyMeta(m) {
+    const out = {};
+    if (!m || typeof m !== 'object' || Array.isArray(m)) return out;
+    if (typeof m.scriptName === 'string') out.scriptName = m.scriptName;
+    if (typeof m.pineId === 'string') out.pineId = m.pineId;
+    if (m.params && typeof m.params === 'object' && !Array.isArray(m.params)) {
+      out.params = { ...m.params };
+    }
+    return out;
+  }
+
+  /** Task 13：STUDIES_UPSERT → entry.studies。任何壞型別輸入一律降級，不拋錯。 */
+  function handleStudiesUpsert(tabId, msg) {
+    const entry = ensureEntry(tabId);
+    if (!(entry.studies instanceof Map)) entry.studies = new Map();
+    const studies = entry.studies;
+
+    if (msg.meta && typeof msg.meta === 'object' && !Array.isArray(msg.meta)) {
+      for (const id of Object.keys(msg.meta)) {
+        const m = msg.meta[id];
+        if (!m || typeof m !== 'object' || Array.isArray(m)) continue;
+        let rec = studies.get(id);
+        if (!rec) {
+          rec = { meta: {}, series: new Map() };
+          studies.set(id, rec);
+        }
+        rec.meta = sanitizeStudyMeta(m);
+      }
+    }
+
+    if (msg.patches && typeof msg.patches === 'object' && !Array.isArray(msg.patches)) {
+      for (const id of Object.keys(msg.patches)) {
+        const rows = msg.patches[id];
+        if (!Array.isArray(rows)) continue;
+        let rec = studies.get(id);
+        if (!rec) {
+          rec = { meta: {}, series: new Map() };
+          studies.set(id, rec);
+        }
+        if (!(rec.series instanceof Map)) rec.series = new Map();
+        for (const row of rows) {
+          if (!Array.isArray(row) || row.length < 2) continue;
+          const time = row[0];
+          if (typeof time !== 'number' || !Number.isFinite(time)) continue;
+          rec.series.set(time, row.slice(1));
+        }
+        evictStudy(rec.series, MAX_STUDY_BARS);
+      }
+    }
+
+    if (Array.isArray(msg.gone)) {
+      for (const id of msg.gone) {
+        if (typeof id === 'string') studies.delete(id);
+      }
+    }
+    return false;
+  }
+
   function handleUpsert(tabId, msg) {
     const isFirstTouch = !registry.has(tabId);
     const entry = ensureEntry(tabId);
@@ -219,6 +300,17 @@ export function createDb(deps = {}) {
     if (msg.reset === true) entry.buffer.reset();
     entry.buffer.upsertBars(msg.bars);
     if (msg.meta && typeof msg.meta === 'object') {
+      const nextSymbol = msg.meta.symbol;
+      // Task 13：主圖 symbol 完整變更 → study 序列一併清（meta 保留）。
+      if (
+        typeof nextSymbol === 'string' &&
+        nextSymbol.length > 0 &&
+        nextSymbol.indexOf('INTERNAL:') !== 0 &&
+        entry.meta.symbol !== undefined &&
+        entry.meta.symbol !== nextSymbol
+      ) {
+        clearStudySeries(entry);
+      }
       if (msg.meta.symbol !== undefined) entry.meta.symbol = msg.meta.symbol;
       if (msg.meta.resolution !== undefined) entry.meta.resolution = msg.meta.resolution;
     }
@@ -317,7 +409,14 @@ export function createDb(deps = {}) {
 
   async function readOptions() {
     try {
-      const got = await storage.local.get(['jevApiKey', 'jevModel', 'bars', 'featuresOn']);
+      const got = await storage.local.get([
+        'jevApiKey',
+        'jevModel',
+        'bars',
+        'featuresOn',
+        // Task 13：study 顯示名稱覆寫（主鍵 studyId）；由 SW 讀出注入 buildStudies。
+        'studyNameMap',
+      ]);
       return got && typeof got === 'object' ? got : {};
     } catch {
       return {};
@@ -372,6 +471,15 @@ export function createDb(deps = {}) {
         { symbol: entry.meta.symbol, resolution, bars: snap },
         { bars: barsN, features: opts.featuresOn !== false },
       );
+      // Task 13：指標數值與 `state.bars` 同窗口對齊後附掛（未掛指標一律 `[]`）。
+      const nameMap =
+        opts.studyNameMap && typeof opts.studyNameMap === 'object'
+          ? opts.studyNameMap
+          : {};
+      state.studies = buildStudies(entry.studies, {
+        bars: state.bars,
+        nameMap,
+      });
 
       const res = await evaluate({
         apiKey,
@@ -445,10 +553,12 @@ export function createDb(deps = {}) {
 
   function getState(tabId) {
     if (tabId === undefined || tabId === null) {
-      return { status: 'idle', count: 0, counters: defaultCounters() };
+      return { status: 'idle', count: 0, counters: defaultCounters(), studiesCount: 0 };
     }
     const entry = registry.get(tabId);
-    if (!entry) return { status: 'idle', count: 0, counters: defaultCounters() };
+    if (!entry) {
+      return { status: 'idle', count: 0, counters: defaultCounters(), studiesCount: 0 };
+    }
     // 09e-3：SW 重啟後常見「首則訊息只有尾根」；若根數不足則主動要求全量重送
     // （不阻塞回應；面板下一輪輪詢即恢復）。預測進行中不動用 pending 以免干擾。
     if (!entry.predicting && entry.buffer.count < PREDICT_MIN_BARS) {
@@ -461,6 +571,8 @@ export function createDb(deps = {}) {
       resolution: entry.meta.resolution !== undefined ? entry.meta.resolution : null,
       // §4.8.1：GET_STATE 新增 counters（其餘欄位與語意不變）。
       counters: entry.counters ? { ...entry.counters } : defaultCounters(),
+      // Task 13：除錯用；已掛載且有序列值的 study 數。
+      studiesCount: entry.studies instanceof Map ? entry.studies.size : 0,
       last: entry.last,
       meta: entry.meta,
     };
@@ -535,12 +647,13 @@ export function createDb(deps = {}) {
       }
     }
 
-    // 非 panel：只接受帶 id 的 content script，且只認 SNAPSHOT_UPSERT。
+    // 非 panel：只接受帶 id 的 content script，且只認 SNAPSHOT_UPSERT／STUDIES_UPSERT。
     const senderTab = sender.tab;
     if (senderTab.id === undefined || senderTab.id === null) return false;
-    if (msg.type !== MSG.SNAPSHOT_UPSERT) return false;
+    if (msg.type !== MSG.SNAPSHOT_UPSERT && msg.type !== MSG.STUDIES_UPSERT) return false;
     if (!isTvSender(sender)) return false;
     noteActiveTab(senderTab.id);
+    if (msg.type === MSG.STUDIES_UPSERT) return handleStudiesUpsert(senderTab.id, msg);
     return handleUpsert(senderTab.id, msg);
   }
 

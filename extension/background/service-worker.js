@@ -2,7 +2,7 @@
 import '../lib/protocol.js';
 import { createDb } from '../lib/sw-core.js';
 import { evaluate } from '../lib/jev-client.js';
-import { buildState, QUESTIONS, estimateTokens } from '../lib/state-builder.js';
+import { buildState, buildStudies, QUESTIONS, estimateTokens } from '../lib/state-builder.js';
 import { ChartBuffer } from '../lib/chart-buffer.js';
 
 // §4.6：protocol.js 為雙相容（無 export），符號掛在 globalThis；此處取 MSG 常數。
@@ -27,7 +27,7 @@ const db = createDb({
         }
       : undefined,
   },
-  evaluate, ChartBuffer, buildState, QUESTIONS, estimateTokens,
+  evaluate, ChartBuffer, buildState, buildStudies, QUESTIONS, estimateTokens,
 });
 
 // §4.8.4：panel 命令一律引用 protocol.js 的 MSG 常數（不得散落字串）。

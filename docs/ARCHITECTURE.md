@@ -184,7 +184,7 @@ jev-tradingview-signal/
     "studies": [                       // 二期：圖表使用中的指標（可為 []）；形狀 Task 12 後定案
       { "id": "51IoAU", "name": "ALMA25（可為使用者自訂名）", "rawName": "Arnaud Legoux Moving Average",
         "params": { "in_0": 25, "in_1": 0.85, "in_2": 6 },
-        "columns": ["time","value"],
+        "columns": ["time","v1", …],            // 通用命名（plot 語意不可知）；多圖指標如 BB＝v1..v3
         "values": [[1690000000, 63000.2], null] }   // 與 bars 同窗口對齊；無值根為 null
     ]
   },

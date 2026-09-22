@@ -121,6 +121,133 @@ export function buildState(snapshot, opts = {}) {
   return state;
 }
 
+// ─────────────────────────────────────────────────────────────
+// §4.2.2／Task 13：study 數列 → systemone `state.studies` 陣列
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 由 study meta 推 `rawName`：
+ * - 有 pineId → 取最後 `;` 後一段，`%1` 還原為空白（如 `STD;Arnaud%1Legoux%1Moving%1Average`
+ *   → `Arnaud Legoux Moving Average`）。
+ * - 否則取 scriptName `@` 前段（如 `Volume@tv-basicstudies-277` → `Volume`）。
+ */
+function deriveRawName(meta) {
+  if (meta && typeof meta.pineId === 'string' && meta.pineId.length > 0) {
+    const idx = meta.pineId.lastIndexOf(';');
+    const seg = idx >= 0 ? meta.pineId.slice(idx + 1) : meta.pineId;
+    return seg.split('%1').join(' ').trim();
+  }
+  if (meta && typeof meta.scriptName === 'string' && meta.scriptName.length > 0) {
+    const at = meta.scriptName.indexOf('@');
+    const seg = at >= 0 ? meta.scriptName.slice(0, at) : meta.scriptName;
+    return seg.trim();
+  }
+  return '';
+}
+
+/** 多字 rawName → 首字母縮寫（`Arnaud Legoux Moving Average` → `ALMA`）。 */
+function acronymOf(rawName) {
+  if (!rawName) return '';
+  const parts = rawName.split(/[\s_]+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return parts
+      .map((p) => p.charAt(0).toUpperCase())
+      .join('');
+  }
+  return rawName;
+}
+
+/**
+ * 取名稱參數縮寫：優先首個有限數值（多為 period，如 25）；
+ * 完全無數值時才用首個非空字串。
+ */
+function firstParamValue(params) {
+  if (!params || typeof params !== 'object') return null;
+  let stringFallback = null;
+  for (const k of Object.keys(params)) {
+    const v = params[k];
+    if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+    if (stringFallback === null && typeof v === 'string' && v.length > 0) {
+      stringFallback = v;
+    }
+  }
+  return stringFallback;
+}
+
+/** 無使用者覆寫時的自動名稱：`acronym(rawName)＋(首個參數)`，如 `ALMA(25)`。 */
+function autoStudyName(rawName, params, fallbackId) {
+  const short = acronymOf(rawName) || (fallbackId != null ? String(fallbackId) : '');
+  const pv = firstParamValue(params);
+  return pv === null ? short : `${short}(${pv})`;
+}
+
+/**
+ * 把 SW 的 studies（`Map<id, {meta, series: Map<time, vals>}>`）轉成 §4.4 studies 陣列。
+ *
+ * - `values` 與 `opts.bars` 同一窗口逐根對齊；該 study 缺值的根補 `null`；
+ * - `columns` 通用 `['time','v1',…]`（多圖指標 BB＝v1..v3）；
+ * - `name` 優先 `opts.nameMap[id]`，否則自動名稱；`rawName` 保留自動名稱；
+ * - `params` 原樣帶出；空序列的 study 直接略過（未掛指標 → `[]`）。
+ *
+ * @param {Map<string, {meta:object, series:Map<number, number[]>}>} studiesMap
+ * @param {{bars?:number[][], nameMap?:Record<string,string>}} [opts]
+ * @returns {Array<{id:string,name:string,rawName:string,params:object,columns:string[],values:(number[]|null)[]}>}
+ */
+export function buildStudies(studiesMap, opts = {}) {
+  const bars = opts && Array.isArray(opts.bars) ? opts.bars : [];
+  const nameMap =
+    opts && opts.nameMap && typeof opts.nameMap === 'object' ? opts.nameMap : {};
+  const out = [];
+
+  if (!studiesMap || typeof studiesMap.forEach !== 'function') return out;
+
+  studiesMap.forEach((rec, id) => {
+    if (!rec || typeof rec !== 'object') return;
+    const series = rec.series instanceof Map ? rec.series : new Map();
+    if (series.size === 0) return; // 只收有逐根值的 study
+
+    const meta = rec.meta && typeof rec.meta === 'object' ? rec.meta : {};
+    const rawName = deriveRawName(meta);
+    const params =
+      meta.params && typeof meta.params === 'object' ? { ...meta.params } : {};
+
+    const override = nameMap[id];
+    const name =
+      typeof override === 'string' && override.length > 0
+        ? override
+        : autoStudyName(rawName, params, id);
+
+    let arity = 0;
+    series.forEach((vals) => {
+      if (Array.isArray(vals) && vals.length > arity) arity = vals.length;
+    });
+    if (arity < 1) arity = 1;
+    if (arity > 4) arity = 4; // §4.4：1–4 值
+
+    const columns = ['time'];
+    for (let i = 1; i <= arity; i += 1) columns.push(`v${i}`);
+
+    const values = [];
+    for (let i = 0; i < bars.length; i += 1) {
+      const time = Array.isArray(bars[i]) ? bars[i][0] : undefined;
+      const vals = series.get(time);
+      if (!Array.isArray(vals)) {
+        values.push(null); // 同窗口缺值根 → null
+        continue;
+      }
+      const row = [time];
+      for (let k = 0; k < arity; k += 1) {
+        row.push(k < vals.length ? vals[k] : null);
+      }
+      values.push(row);
+    }
+
+    out.push({ id, name, rawName, params, columns, values });
+  });
+
+  return out;
+}
+
 /**
  * 以 `JSON.stringify(state)` 長度粗估 token 數（4 字元 ≈ 1 token）。
  * @param {object} state

@@ -9,6 +9,7 @@
   var TV_ORIGIN = 'https://www.tradingview.com';
   var V = 1;
   var SNAPSHOT_UPSERT = 'SNAPSHOT_UPSERT';
+  var STUDIES_UPSERT = 'STUDIES_UPSERT';
   var REQ_SNAPSHOT = 'REQ_SNAPSHOT';
   var JEV_PING = 'JEV_PING';
 
@@ -29,19 +30,31 @@
 
     var data = event.data;
     if (!data || typeof data !== 'object' || data.v !== V) return;
-    if (data.type !== SNAPSHOT_UPSERT) return;
+    if (data.type !== SNAPSHOT_UPSERT && data.type !== STUDIES_UPSERT) return;
 
     if (!hasRuntime()) return;
 
-    var out = {
-      v: V,
-      type: data.type,
-      bars: data.bars,
-      reset: data.reset,
-      // §4.8.1：旁聽計數原樣轉發（缺值為 undefined，SW 端會降級為 0）。
-      counters: data.counters,
-      meta: data.meta,
-    };
+    // 只轉發白名單欄位（study 訊息不含 bars/reset/counters，避免污染既有契約）。
+    var out;
+    if (data.type === STUDIES_UPSERT) {
+      out = {
+        v: V,
+        type: STUDIES_UPSERT,
+        meta: data.meta,
+        patches: data.patches,
+        gone: data.gone,
+      };
+    } else {
+      out = {
+        v: V,
+        type: data.type,
+        bars: data.bars,
+        reset: data.reset,
+        // §4.8.1：旁聽計數原樣轉發（缺值為 undefined，SW 端會降級為 0）。
+        counters: data.counters,
+        meta: data.meta,
+      };
+    }
 
     try {
       var p = chrome.runtime.sendMessage(out);

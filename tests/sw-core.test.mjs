@@ -319,11 +319,11 @@ test('GET_STATE 無 entry → {status:"idle",count:0,counters:{0,0}}', () => {
   const db = createDb(makeHarness().deps);
   assert.deepEqual(
     db.handleRuntimeMessage({ v: 1, type: 'GET_STATE', tabId: 999 }, panelSender()),
-    { status: 'idle', count: 0, counters: { dropped: 0, ignoredSeriesFrames: 0 } },
+    { status: 'idle', count: 0, counters: { dropped: 0, ignoredSeriesFrames: 0 }, studiesCount: 0 },
   );
   assert.deepEqual(
     db.handleRuntimeMessage({ v: 1, type: 'GET_STATE' }, panelSender()),
-    { status: 'idle', count: 0, counters: { dropped: 0, ignoredSeriesFrames: 0 } },
+    { status: 'idle', count: 0, counters: { dropped: 0, ignoredSeriesFrames: 0 }, studiesCount: 0 },
   );
 });
 
@@ -678,7 +678,7 @@ test('§4.8.1 counters 捎帶：upsert 帶 counters → entry.counters 更新、
   // 未收到 upsert 前：預設 {0,0}。
   assert.deepEqual(
     db.handleRuntimeMessage({ v: 1, type: 'GET_STATE' }, panelSender()),
-    { status: 'idle', count: 0, counters: { dropped: 0, ignoredSeriesFrames: 0 } },
+    { status: 'idle', count: 0, counters: { dropped: 0, ignoredSeriesFrames: 0 }, studiesCount: 0 },
   );
 
   db.handleRuntimeMessage(
@@ -943,4 +943,210 @@ test('§4.8.2 ring log 不持久化：storage 只可能寫 lastActiveTabId，絕
   assert.ok(keys.length > 0, '應至少寫過 activeTabId');
   assert.deepEqual([...new Set(keys)], ['lastActiveTabId']);
   assert.ok(writes.every((w) => !/ring/i.test(JSON.stringify(w))));
+});
+
+// ─────────────────────────────────────────────────────────────
+// Task 13／§4.2.2：study 消費（entry.studies / GET_STATE.studiesCount / state.studies）
+// ─────────────────────────────────────────────────────────────
+
+/** STUDIES_UPSERT 訊息（模擬 inject→bridge→SW）。 */
+function studiesUpsert(meta, patches, gone) {
+  return {
+    v: 1,
+    type: globalThis.MSG.STUDIES_UPSERT,
+    meta,
+    patches,
+    ...(gone ? { gone } : {}),
+  };
+}
+
+test('Task13 STUDIES_UPSERT：meta+patches → entry.studies、GET_STATE studiesCount', () => {
+  const db = createDb(makeHarness().deps);
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'S', resolution: '1' }),
+    tvSender(1),
+  );
+
+  assert.equal(
+    db.handleRuntimeMessage(
+      studiesUpsert(
+        { '51IoAU': { scriptName: 'Script@x', pineId: 'STD;Arnaud%1Legoux%1Moving%1Average', params: { in_0: 25 } } },
+        { '51IoAU': [[1000, 1], [1060, 2]] },
+      ),
+      tvSender(1),
+    ),
+    false,
+  );
+
+  const rec = db.entryFor(1).studies.get('51IoAU');
+  assert.equal(rec.meta.pineId, 'STD;Arnaud%1Legoux%1Moving%1Average');
+  assert.deepEqual(rec.meta.params, { in_0: 25 });
+  assert.deepEqual(rec.series.get(1000), [1]);
+  assert.deepEqual(rec.series.get(1060), [2]);
+
+  // 同 time 後到覆寫。
+  db.handleRuntimeMessage(
+    studiesUpsert({}, { '51IoAU': [[1060, 22]] }),
+    tvSender(1),
+  );
+  assert.deepEqual(db.entryFor(1).studies.get('51IoAU').series.get(1060), [22]);
+
+  const summary = db.handleRuntimeMessage(
+    { v: 1, type: globalThis.MSG.GET_STATE, tabId: 1 },
+    panelSender(),
+  );
+  assert.equal(summary.studiesCount, 1);
+  assert.equal(summary.count, 60);
+});
+
+test('Task13 每 study 序列上限 3000 丟最舊；gone 移除該 study', () => {
+  const db = createDb(makeHarness().deps);
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'S', resolution: '1' }),
+    tvSender(1),
+  );
+
+  const rows = Array.from({ length: 3005 }, (_, i) => [i + 1, i]);
+  db.handleRuntimeMessage(
+    studiesUpsert({ sid: { scriptName: 'X' } }, { sid: rows }),
+    tvSender(1),
+  );
+  const series = db.entryFor(1).studies.get('sid').series;
+  assert.equal(series.size, 3000);
+  assert.equal(series.has(1), false, '最舊 5 根被丟棄');
+  assert.equal(series.has(3005), true);
+
+  db.handleRuntimeMessage(studiesUpsert({}, {}, ['sid']), tvSender(1));
+  assert.equal(db.entryFor(1).studies.has('sid'), false, 'gone 移除');
+});
+
+test('Task13 symbol 完整重置 → study 序列清、meta 保留；同 symbol reset 不清', () => {
+  const db = createDb(makeHarness().deps);
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'AAA', resolution: '1' }),
+    tvSender(1),
+  );
+  db.handleRuntimeMessage(
+    studiesUpsert({ sid: { scriptName: 'X', params: { in_0: 1 } } }, { sid: [[1000, 1]] }),
+    tvSender(1),
+  );
+  assert.equal(db.entryFor(1).studies.get('sid').series.size, 1);
+
+  // 同 symbol 的 reset:true（series_loading／timeframe）不得清 study 序列。
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'AAA', resolution: '5' }, true),
+    tvSender(1),
+  );
+  assert.equal(db.entryFor(1).studies.get('sid').series.size, 1);
+
+  // 真實 symbol 變更 → 清序列、保留 meta。
+  db.handleRuntimeMessage(
+    upsert(bars(2_000_000, 60), { symbol: 'BBB', resolution: '5' }),
+    tvSender(1),
+  );
+  const rec = db.entryFor(1).studies.get('sid');
+  assert.equal(rec.series.size, 0, 'symbol 變更清空序列');
+  assert.equal(rec.meta.scriptName, 'X', 'meta 保留');
+  assert.equal(db.entryFor(1).studies.size, 1);
+
+  // INTERNAL:* 的 symbol 不得觸發清序列（防護）。
+  db.handleRuntimeMessage(
+    studiesUpsert({}, { sid: [[1000, 9]] }),
+    tvSender(1),
+  );
+  db.handleRuntimeMessage(
+    upsert(bars(2_000_000, 60), { symbol: 'INTERNAL:SEASONALS', resolution: '5' }),
+    tvSender(1),
+  );
+  assert.equal(db.entryFor(1).studies.get('sid').series.size, 1);
+});
+
+test('Task13 STUDIES_UPSERT 壞型別輸入不炸', () => {
+  const db = createDb(makeHarness().deps);
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'S', resolution: '1' }),
+    tvSender(1),
+  );
+
+  const bad = [
+    { v: 1, type: globalThis.MSG.STUDIES_UPSERT, meta: null, patches: null },
+    { v: 1, type: globalThis.MSG.STUDIES_UPSERT, meta: 'x', patches: [] },
+    { v: 1, type: globalThis.MSG.STUDIES_UPSERT, meta: { a: 1 }, patches: { a: 'no' } },
+    {
+      v: 1,
+      type: globalThis.MSG.STUDIES_UPSERT,
+      meta: { b: { scriptName: 'B', evil: 'drop' } },
+      patches: { b: [[1], [2, 'x'], [NaN, 1], ['t', 1], null, {}] },
+    },
+    { v: 1, type: globalThis.MSG.STUDIES_UPSERT, gone: 'nope' },
+    { v: 1, type: globalThis.MSG.STUDIES_UPSERT, gone: [1, null, 'z'] },
+  ];
+  for (const m of bad) {
+    assert.equal(db.handleRuntimeMessage(m, tvSender(1)), false, '不拋錯、回 false');
+  }
+
+  // 壞輸入中唯一有效的一列被收下；其餘任意鍵被 sanitize 掉。
+  const series = db.entryFor(1).studies.get('b').series;
+  assert.deepEqual([...series.entries()], [[2, ['x']]]);
+  assert.equal('evil' in db.entryFor(1).studies.get('b').meta, false);
+
+  // 非 TV sender 的 STUDIES_UPSERT 一律拒絕。
+  assert.equal(
+    db.handleRuntimeMessage(
+      studiesUpsert({ x: {} }, { x: [[1, 1]] }),
+      { url: 'https://example.com', tab: { id: 9, url: 'https://example.com' } },
+    ),
+    false,
+  );
+  assert.equal(db.entryFor(9), undefined);
+});
+
+test('Task13 RUN_PREDICTION：state.studies 與 bars 窗口對齊、nameMap 覆寫、未掛指標 []', async () => {
+  const h = makeHarness({ store: { studyNameMap: { sid: '自訂名稱' } } });
+  const db = createDb(h.deps);
+  const all = bars(1_000_000, 350);
+  db.handleRuntimeMessage(
+    upsert(all, { symbol: 'BINANCE:BTCUSDT', resolution: '1' }),
+    tvSender(1),
+  );
+
+  const t0 = all[347][0];
+  const t1 = all[348][0];
+  const t2 = all[349][0];
+  db.handleRuntimeMessage(
+    studiesUpsert(
+      { sid: { scriptName: 'Volume@tv-basicstudies-277', params: { length: 20 } } },
+      { sid: [[t0, 1], [t1, 2], [t2, 3]] },
+    ),
+    tvSender(1),
+  );
+
+  const res = await db.handleRuntimeMessage(run(1), panelSender());
+  assert.equal(res.ok, true);
+  const state = h.evaluateCalls[0].state;
+  assert.ok(Array.isArray(state.studies), 'state 必須帶 studies');
+  assert.equal(state.studies.length, 1);
+  const s = state.studies[0];
+  assert.equal(s.id, 'sid');
+  assert.equal(s.name, '自訂名稱', 'nameMap 覆寫優先');
+  assert.equal(s.rawName, 'Volume');
+  assert.deepEqual(s.params, { length: 20 });
+  assert.deepEqual(s.columns, ['time', 'v1']);
+  // state.bars 視窗 = 最近 300 根（all.slice(50)）；study 值在最後 3 根。
+  assert.equal(s.values.length, state.bars.length);
+  assert.equal(s.values.length, 300);
+  assert.deepEqual(s.values[297], [t0, 1]);
+  assert.deepEqual(s.values[298], [t1, 2]);
+  assert.deepEqual(s.values[299], [t2, 3]);
+  assert.equal(s.values[0], null, '同窗口缺值根補 null');
+
+  // 未掛指標的 tab → studies:[]。
+  const h2 = makeHarness();
+  const db2 = createDb(h2.deps);
+  db2.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'S', resolution: '1' }),
+    tvSender(2),
+  );
+  await db2.handleRuntimeMessage(run(2), panelSender());
+  assert.deepEqual(h2.evaluateCalls[0].state.studies, []);
 });

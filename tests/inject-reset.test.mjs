@@ -66,7 +66,11 @@ function setup() {
     removeEventListener(t, f) {
       this._l[t] = (this._l[t] || []).filter((x) => x !== f);
     }
-    send() {}
+    send() {
+      (this.sentArgs ||= []).push(Array.from(arguments));
+      if (this.throwOnSend) throw this.throwOnSend;
+      return this.sendReturn;
+    }
     close() {
       this.closed = true;
     }
@@ -126,8 +130,13 @@ function setup() {
     for (const f of listeners.message || []) f({ source: innerWindow, data });
   };
   const messages = () => captured.map((c) => c.msg);
-  const last = () => messages().at(-1);
-  return { sandbox, ws, captured, messages, last, fireMessage };
+  // Task 13 起每次 flush 可能在 SNAPSHOT_UPSERT 後再帶一則 STUDIES_UPSERT；
+  // 既有斷言全部針對 bar 快照，故 last() 只取最近一則 SNAPSHOT_UPSERT。
+  const last = () =>
+    messages().filter((m) => m && m.type === 'SNAPSHOT_UPSERT').at(-1);
+  const lastOf = (type) =>
+    messages().filter((m) => m && m.type === type).at(-1);
+  return { sandbox, ws, captured, messages, last, lastOf, fireMessage };
 }
 
 test('§4.7.1 reset 不清空未送出的 bar；reset 後第一次 flush 全量（reset:true）', () => {
@@ -410,4 +419,192 @@ test('§4.8.1 counters 為累計值且既有 payload 欄位形狀不變', () => 
   assert.equal(typeof em.meta.total, 'number');
   assert.equal(typeof em.meta.dropped, 'number');
   assert.equal(typeof em.meta.ts, 'number');
+});
+
+// ─────────────────────────────────────────────────────────────
+// Task 13／§4.2.2：send 只讀包裝 ＋ study 消費
+// ─────────────────────────────────────────────────────────────
+
+/** vm 跨 realm 物件 → 外層 plain object（deepEqual 前先正規化）。 */
+const plain = (x) => JSON.parse(JSON.stringify(x));
+
+/** create_study 上行幀（含加密 text blob，必須被 redact 掉）。 */
+function createStudyFrame(id, extraOptions) {
+  return {
+    m: 'create_study',
+    p: [
+      'cs_TEST',
+      id,
+      'st1',
+      'sds_1',
+      'Script@tv-scripting-101!',
+      {
+        text: 'TOP-SECRET-BLOB',
+        pineId: 'STD;Arnaud%1Legoux%1Moving%1Average',
+        pineVersion: '29.0',
+        pineFeatures: { v: '{}', f: true, t: 'text' },
+        in_0: { v: 25, f: true, t: 'integer' },
+        in_1: { v: 0.85, f: true, t: 'float' },
+        __fast_calc: { v: false, f: true, t: 'bool' },
+        __profile: { v: false, f: true, t: 'bool' },
+        ...(extraOptions || {}),
+      },
+    ],
+  };
+}
+
+/** du 下行幀：以 `st:[{i,v}]` 推送 study 逐根值（i 用負 sentinel 不影響）。 */
+function duStudyFrame(id, rows) {
+  return {
+    m: 'du',
+    p: [
+      'cs_TEST',
+      {
+        [id]: {
+          st: rows.map(([time, val]) => ({ i: -1000100, v: [time, val] })),
+          ns: { d: '{"graphics":"must-not-leak"}' },
+          t: 's1_st1',
+        },
+      },
+    ],
+  };
+}
+
+test('Task13 send 只讀包裝：同參數呼叫原生、同返回、例外一致（不改行為）', () => {
+  const h = setup();
+
+  h.ws.sendReturn = 'NATIVE-RET';
+  const r = h.ws.send('a', { b: 1 });
+  assert.equal(r, 'NATIVE-RET', '返回值原樣透傳');
+  assert.deepEqual(h.ws.sentArgs, [['a', { b: 1 }]], '參數未經改動');
+
+  const boom = new Error('native send exploded');
+  h.ws.throwOnSend = boom;
+  assert.throws(() => h.ws.send('c'), /native send exploded/, '原生例外一致往外拋');
+  assert.deepEqual(h.ws.sentArgs[1], ['c'], '例外前仍原樣呼叫了原生 send');
+});
+
+test('Task13 create_study(send)＋du study(recv) → STUDIES_UPSERT（text redact、尾根覆寫）', () => {
+  const h = setup();
+
+  h.ws.send(frame(createStudyFrame('51IoAU')));
+  // 負 sentinel i 的歷史批＋尾根覆寫，ns graphics 不得混入。
+  h.ws.dispatch(
+    frame({
+      m: 'du',
+      p: [
+        'cs_TEST',
+        {
+          '51IoAU': {
+            st: [
+              { i: -1000100, v: [1000, 1] },
+              { i: 299, v: [1000, 2] },
+              { i: 300, v: [1060, 3] },
+            ],
+            ns: { d: '{"graphics":"must-not-leak"}' },
+            t: 's1_st1',
+          },
+        },
+      ],
+    }),
+  );
+  h.sandbox.__JEV_FORCE_EMIT();
+
+  const su = plain(h.lastOf('STUDIES_UPSERT'));
+  assert.ok(su, '應發出 STUDIES_UPSERT');
+  assert.equal(su.v, 1);
+  assert.equal(su.type, 'STUDIES_UPSERT');
+  assert.equal(su.meta['51IoAU'].pineId, 'STD;Arnaud%1Legoux%1Moving%1Average');
+  assert.deepEqual(su.meta['51IoAU'].params, { in_0: 25, in_1: 0.85 });
+  assert.equal('text' in su.meta['51IoAU'], false);
+  assert.equal('pineFeatures' in su.meta['51IoAU'], false);
+  assert.equal('__fast_calc' in su.meta['51IoAU'], false);
+  assert.equal(JSON.stringify(su).includes('TOP-SECRET-BLOB'), false, 'text 不得外流');
+  assert.equal(JSON.stringify(su).includes('must-not-leak'), false, 'ns 圖形指令不得外流');
+  assert.deepEqual(su.patches['51IoAU'], [[1000, 2], [1060, 3]], '負 i 忽略、同 time 尾根覆寫');
+});
+
+test('Task13 STUDIES_UPSERT 只送增量：同值不重送、meta 只送一次、變更才送', () => {
+  const h = setup();
+  h.ws.send(frame(createStudyFrame('sid')));
+  h.ws.dispatch(frame(duStudyFrame('sid', [[1000, 1]])));
+  h.sandbox.__JEV_FORCE_EMIT();
+
+  const first = h.lastOf('STUDIES_UPSERT');
+  assert.ok(first);
+  assert.deepEqual(plain(first).patches, { sid: [[1000, 1]] });
+  assert.ok(first.meta.sid, '首次帶 meta');
+
+  // 同值再來 → 無變更 → 不再發 STUDIES_UPSERT。
+  h.ws.dispatch(frame(duStudyFrame('sid', [[1000, 1]])));
+  h.sandbox.__JEV_FORCE_EMIT();
+  assert.equal(h.lastOf('STUDIES_UPSERT'), first, '無變更不得重送');
+
+  // 值變更 → 只送增量，meta 已送不再重複。
+  h.ws.dispatch(frame(duStudyFrame('sid', [[1000, 2]])));
+  h.sandbox.__JEV_FORCE_EMIT();
+  const second = h.lastOf('STUDIES_UPSERT');
+  assert.notEqual(second, first);
+  assert.deepEqual(plain(second).patches, { sid: [[1000, 2]] });
+  assert.deepEqual(plain(second).meta, {}, 'meta 只送一次');
+});
+
+test('Task13 full:true 觸發 study meta+patches 全量重送（SW 重啟可重建）', () => {
+  const h = setup();
+  h.ws.send(frame(createStudyFrame('sid')));
+  h.ws.dispatch(frame(duStudyFrame('sid', [[1000, 1], [1060, 2]])));
+  h.sandbox.__JEV_FORCE_EMIT();
+  assert.ok(h.lastOf('STUDIES_UPSERT'));
+
+  h.fireMessage({ v: 1, type: 'JEV_PING', full: true });
+  const su = plain(h.lastOf('STUDIES_UPSERT'));
+  assert.ok(su.meta.sid, 'full:true 需重送 meta');
+  assert.deepEqual(su.patches.sid, [[1000, 1], [1060, 2]], 'full:true 需全量重送');
+});
+
+test('Task13 主圖 symbol 完整重置清 study 序列（同值會重送），meta 不重送', () => {
+  const h = setup();
+  h.ws.send(frame(createStudyFrame('sid')));
+  h.ws.dispatch(frame(symbolResolved('BINANCE:AAAUSDT')));
+  h.ws.dispatch(frame(duStudyFrame('sid', [[1000, 1]])));
+  h.sandbox.__JEV_FORCE_EMIT();
+  assert.deepEqual(plain(h.lastOf('STUDIES_UPSERT')).patches, { sid: [[1000, 1]] });
+
+  // 站內換商品（真實 symbol 變更）→ 序列清；同值重現需重新送出。
+  h.ws.dispatch(frame(symbolResolved('BINANCE:BBBUSDT')));
+  h.ws.dispatch(frame(duStudyFrame('sid', [[1000, 1]])));
+  h.sandbox.__JEV_FORCE_EMIT();
+  const su = plain(h.lastOf('STUDIES_UPSERT'));
+  assert.deepEqual(su.patches, { sid: [[1000, 1]] }, '序列已清 → 同值重送');
+  assert.deepEqual(su.meta, {}, '身分保留、無需重送 meta');
+
+  // 換商品後 bars 快照必須 reset:true（既有契約不得回歸）。
+  assert.equal(h.last().reset, true);
+});
+
+test('Task13 已被消費的 study du 不計入 dropped（counters 語意一致）', () => {
+  const h = setup();
+  h.ws.send(frame(createStudyFrame('sid')));
+  h.ws.dispatch(frame(duStudyFrame('sid', [[1000, 1]])));
+  h.sandbox.__JEV_FORCE_EMIT();
+  const em = h.last();
+  assert.equal(em.counters.dropped, 0, 'study du 已消費不得算 dropped');
+  assert.equal(em.counters.ignoredSeriesFrames, 0);
+});
+
+test('Task13 st 恆空的 study（如 BarSet）自動排除；非 TV ws 的 send 不記錄', () => {
+  const h = setup();
+  // create_study 有身分，但 du 的 st 為空 → 不得出現在 STUDIES_UPSERT。
+  h.ws.send(frame(createStudyFrame('yl9zbk')));
+  h.ws.dispatch(
+    frame({ m: 'du', p: ['cs_TEST', { yl9zbk: { st: [], t: 's1_st1' } }] }),
+  );
+  h.sandbox.__JEV_FORCE_EMIT();
+  assert.equal(h.lastOf('STUDIES_UPSERT'), undefined, 'st 恆空 → 無 study 訊息');
+
+  // 非 TV 連線：send 不應觸發任何 study 記錄。
+  const other = new h.sandbox.WebSocket('wss://example.com/ws');
+  other.send(frame(createStudyFrame('evil')));
+  h.sandbox.__JEV_FORCE_EMIT();
+  assert.equal(h.lastOf('STUDIES_UPSERT'), undefined, '非 TV ws 不被消費');
 });

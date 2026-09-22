@@ -181,3 +181,118 @@ function extractBars(node) {
     .map((e) => e.v);
   return bars.length > 0 ? bars : null;
 }
+
+// ────────────────────────────────────────────────────────────────────
+// Task 13／§4.2.2：study 身分（上行 create_study）與逐根數值（下行 du）
+// ────────────────────────────────────────────────────────────────────
+
+/** create_study options 內不得進入 meta 的鍵（含加密 text blob）。 */
+const STUDY_OPTION_EXCLUDE = new Set([
+  'text',
+  'pineFeatures',
+  'pineId',
+  'pineVersion',
+  '__fast_calc',
+  '__profile',
+]);
+
+/** 把 `{v, f, t}` 包裝還原成值；非包裝則原樣。 */
+function unwrapOptionValue(entry) {
+  if (entry && typeof entry === 'object' && !Array.isArray(entry) && 'v' in entry) {
+    return entry.v;
+  }
+  return entry;
+}
+
+/** 把 payload（JSON 字串或已解析物件）轉為 `{m,p}` 物件，失敗回 null。 */
+function coercePayloadObject(jsonTextOrObj) {
+  let root = jsonTextOrObj;
+  if (typeof root === 'string') {
+    try {
+      root = JSON.parse(root);
+    } catch {
+      return null;
+    }
+  }
+  if (!root || typeof root !== 'object' || Array.isArray(root)) return null;
+  return root;
+}
+
+/**
+ * 解析上行 `create_study`：`p=[cid, studyId, "st1", "sds_1", scriptName, options]`。
+ * - Pine 型（options.pineId 為字串）：`meta.pineId` ＋ `params` 取 `in_0..in_N`。
+ * - 直給型：`params` 取具名參數（排除 `text`／`pineFeatures`／`__*` 等）。
+ * - `options.text`（加密 blob）永不複製（redact）。
+ *
+ * @param {string|object} jsonTextOrObj
+ * @returns {{kind:'study_meta', studyId:string, meta:{scriptName?:string, pineId?:string, params?:object}}|null}
+ */
+function parseCreateStudy(jsonTextOrObj) {
+  const root = coercePayloadObject(jsonTextOrObj);
+  if (!root || root.m !== 'create_study') return null;
+  const p = root.p;
+  if (!Array.isArray(p)) return null;
+  const studyId = p[1];
+  if (typeof studyId !== 'string' || studyId.length === 0) return null;
+
+  const scriptName = typeof p[4] === 'string' ? p[4] : undefined;
+  const options =
+    p[5] && typeof p[5] === 'object' && !Array.isArray(p[5]) ? p[5] : null;
+
+  const meta = {};
+  if (scriptName !== undefined) meta.scriptName = scriptName;
+
+  if (options) {
+    const pineId = options.pineId;
+    const params = {};
+    if (typeof pineId === 'string' && pineId.length > 0) {
+      meta.pineId = pineId;
+      for (const k of Object.keys(options)) {
+        if (/^in_\d+$/.test(k)) params[k] = unwrapOptionValue(options[k]);
+      }
+    } else {
+      for (const k of Object.keys(options)) {
+        if (STUDY_OPTION_EXCLUDE.has(k) || k.startsWith('__')) continue;
+        params[k] = unwrapOptionValue(options[k]);
+      }
+    }
+    if (Object.keys(params).length > 0) meta.params = params;
+  }
+
+  return { kind: 'study_meta', studyId, meta };
+}
+globalThis.parseCreateStudy = parseCreateStudy;
+
+/**
+ * 解析下行 `du` 內非 `/^sds_/` 鍵的逐根 study 數值。
+ * - 每根 `{i,v}`：**忽略 i**（歷史批為負 sentinel），一律以 `v[0]`（epoch 秒）為 key。
+ * - 只收至少有一根有效值的 study（`st` 恆空者自動排除，非寫死清單）。
+ *
+ * @param {string|object} jsonTextOrObj
+ * @returns {Array<{studyId:string, rows:number[][]}>|null}
+ */
+function parseDuStudies(jsonTextOrObj) {
+  const root = coercePayloadObject(jsonTextOrObj);
+  if (!root || root.m !== 'du') return null;
+  const body = Array.isArray(root.p) ? root.p[1] : undefined;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+
+  const out = [];
+  for (const key of Object.keys(body)) {
+    if (SDS_PREFIX_RE.test(key)) continue; // bar series，另有 classifyDu 處理
+    const st = body[key] && body[key].st;
+    if (!Array.isArray(st)) continue;
+    const rows = [];
+    for (const e of st) {
+      if (!e || typeof e !== 'object') continue;
+      const v = e.v;
+      if (!Array.isArray(v) || v.length < 2) continue; // 需 time＋≥1 值
+      const time = v[0];
+      if (typeof time !== 'number' || !isFinite(time)) continue;
+      rows.push(v.slice());
+    }
+    if (rows.length > 0) out.push({ studyId: key, rows });
+  }
+  return out.length > 0 ? out : null;
+}
+globalThis.parseDuStudies = parseDuStudies;
