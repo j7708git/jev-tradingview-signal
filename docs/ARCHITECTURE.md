@@ -1,4 +1,4 @@
-# ARCHITECTURE — jev-signal
+# ARCHITECTURE — jev-tradingview-signal
 
 ## 1. 技術棧
 
@@ -49,7 +49,7 @@
 ## 3. 目錄結構
 
 ```
-TradingView-Jev-Signal/
+jev-tradingview-signal/
 ├── extension/                  # chrome://extensions「載入未封裝」指向這裡
 │   ├── manifest.json
 │   ├── background/

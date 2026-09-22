@@ -1,4 +1,4 @@
-# PRD — jev-signal（TradingView × Jev 預測 Chrome Extension）
+# PRD — jev-tradingview-signal（TradingView × Jev 預測 Chrome Extension）
 
 ## 1. 背景與目標
 

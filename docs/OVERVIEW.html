@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
-<title>jev-signal 總覽</title>
+<title>jev-tradingview-signal 總覽</title>
 <style>
   .wrap { font-family: var(--app-font, system-ui, sans-serif); color: var(--foreground); padding: 20px; }
   h1 { font-size: 20px; margin: 0 0 4px; }
@@ -27,19 +27,19 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>jev-signal — TradingView × Jev 預測 Chrome Extension</h1>
+  <h1>jev-tradingview-signal — TradingView × Jev 預測 Chrome Extension</h1>
   <div class="sub">個人工具・MV3・零依賴・手動按鈕 → 一次盤勢判斷（多/觀/空＋校準機率）</div>
 
-  <div class="flow"><pre>TradingView 分頁（注入 world:MAIN 旁聽自家 WebSocket → mem 幀 → OHLCV 滚动緩衝）
+  <div class="flow"><pre>TradingView 分頁（注入 world:MAIN 旁聽自家 WebSocket → socket.io 分幀 → OHLCV 滾動緩衝）
         → content bridge → service worker（快照→派生特徵→state 組裝）
-        → POST api.typesafe.ai /v1/systemone（jev-latest，三題：direction/up_10_bars/trend_strength）
+        → POST api.typesafe.ai /v1/systemone（jev-latest，四題：direction/up_10_bars/bull_trend/bear_trend）
         → Side Panel：方向徽章＋機率條＋confidence＋token 成本＋原始 JSON</pre></div>
 
   <div class="grid">
     <div class="card"><h2>已定案決策</h2><ul>
       <li>直打 TypeSafe 官方 API，<b>繞過 jev-proxy</b>（零後端改動）</li>
       <li>取數＝頁面 ws 旁聽（不發自製訂閱、不改 send）</li>
-      <li>第一期只旁聽已載入 K 棒（600–1000 根），預測取最近 300 根</li>
+      <li>只旁聽已載入 K 棒（TV 首屏 300 根＋尾根增量）；預測取最近 N 根（預設 300，可調 50–1000）</li>
       <li>state＝OHLCV＋本地派生特徵（MA20/50、RSI14、動量），開關可關</li>
       <li>不做：下單、回測、TV 指標數值、持久化、上架</li>
     </ul></div>
@@ -48,7 +48,7 @@
       <li>Chrome 保持可登陸 TradingView（Task 01 取證與 Task 09 驗收要用真實圖表）</li>
       <li>簽核本總覽＋docs 四件套 → 說「簽核，開始 Task 01」</li>
     </ol>
-    <div class="note">成本預估：300 根 K 棒 ≈ 1 萬 token ≈ 每次預測 <b>&lt; $0.0005</b>；Jev 延遲 70–500ms，按鈕體驗接近即時。</div></div>
+    <div class="note">成本實測（2026-09-22 真機）：單次預測 ≈17.5K token ≈ <b>$0.0007</b>（約 NT$0.02）；Jev 端回應約 1 秒。</div></div>
   </div>
 
   <h2 style="font-size:15px;margin:0 0 2px">任務進度</h2>
@@ -59,6 +59,7 @@
 </div>
 <script>
 const DONE = new Set(['01','02','03','04','05','06','07','08','09']);      // 完成後放 '01' …（09 於 2026-09-22 使用者實測通過）
+const DOING = new Set();                                                    // 進行中的任務 id 放這裡（目前皆已完成）
 const TASKS = [
   ['01','TV ws 協定取證 spike（成敗關鍵）','架構師親執行'],
   ['02','骨架＋protocol＋ChartBuffer','pi'],
