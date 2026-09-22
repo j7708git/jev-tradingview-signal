@@ -16,6 +16,8 @@ Denny 在 Chrome 使用 TradingView 看圖。本專案做一個個人用 Chrome 
 - US3：作為除錯的人，我能展開「原始 payload／原始回應」檢視實際送出的 JSON 與 API 回傳，不需開 DevTools。
 - US4：作為金鑰持有者，我在擴充設定頁貼上 `TYPESAFE_API_KEY`，key 只存在瀏覽器擴充儲存區，從不顯示完整明文、從不送到除 api.typesafe.ai 以外的任何地方。
 - US5：作為重度使用者，我可以調整送給 Jev 的 K 棒數量（預設最近 300 根）與派生特徵開關（MA20/50、RSI14、動量，預設開）。
+- US6：（2026-09-22）作為使用者，我在 Side Panel 一鍵「⚙ 設定」直接開啟擴充設定頁填 API key，不必繞 chrome://extensions；未設定 key 時錯誤訊息旁有同一入口。
+- US7：（2026-09-22）作為看盤的人，我圖表上使用中的指標（均線、RSI…）自動偵測並把其數值序列一併送給 Jev——與 K 棒同一窗口對齊，不需手動設定任何清單；Panel 動態列出各指標的名稱輸入框（預設＝自動偵測名稱），我可自行改名，送給 Jev 的名稱以我改的為準。
 
 ## 3. 功能需求（每項附驗收標準）
 
@@ -28,12 +30,15 @@ Denny 在 Chrome 使用 TradingView 看圖。本專案做一個個人用 Chrome 
 | F5 | 結果呈現：Side Panel 顯示方向徽章（多=綠／觀=灰／空=紅）、三個選項的機率條、confidence、input token 數；錯誤狀態有明確中文訊息 | 人工試玩：換符號、斷網、錯 key 三種情況都有可分辨的 UI 狀態，不會永遠卡「預測中」 |
 | F6 | 設定頁：API key（password 欄位）、模型（jev-latest/jev-preview）、bar 數（50–1000）、特徵開關 | 存錯鑰匙格式→可存但預測時給 401 中文提示；設定重載後保留 |
 | F7 | 除錯輸出：payload 與回應 JSON 可在 Panel 展開複製 | 複製出的 JSON 用 `JSON.parse` 可解析（e2e 腳本以固定樣板驗證組裝邏輯） |
+| F8 | （二期）Panel 設定入口：「⚙ 設定」按鈕（`chrome.runtime.openOptionsPage()`）＋ no_key 錯誤態 CTA | Panel 點擊即開設定頁；manifest 無新權限 |
+| F9 | （二期）指標串接：自動偵測圖表使用中的 study，數值序列隨 `state.studies` 送出，與 `bars` 設定同窗口、同時間軸對齊；無值根為 null | 掛 N 個指標的圖按預測，payload.studies 含 N 筆（名稱/參數可辨識，不可辨識時降級原始 id＋TV 顯示名稱）；未掛指標時 `studies:[]` 且既有流程零回歸 |
+| F10 | （二期）指標名稱映射 UI：Panel 動態列出偵測到的指標各一個輸入框（預設＝自動偵測名稱），可自行修改、失焦即存 `chrome.storage.local` 持久化 | 指標新增/移除時輸入框跟著出現/收起；重載後自訂名稱仍在；送 Jev 的 `name` 為自訂值（`rawName` 保留自動名稱） |
 
 ## 4. Non-Goals（明確不做）
 
 - 不自動下單、不連任何券商／交易所 API。
 - 不做歷史回測、不做勝率統計面板（第一期）。
-- 不抓 TradingView 指標（study）數值——第一期只有 OHLCV＋本地派生特徵；指標串接留第二期。
+- ~~不抓 TradingView 指標（study）數值~~——**2026-09-22 第二期啟動**，改見 F9（仍嚴守：不主動發自製訂閱幀、不解析自訂 Pine 語意，僅傳 TV 顯示名稱＋數值）。
 - 不做跨會話預測紀錄持久化（只留 service worker 記憶體中的 ring log）。
 - 不上架 Chrome Web Store（個人「載入未封裝」；架構不散佈憑證、保留日後上架可能性）。
 - 不支援 tradingview.com 以外的圖表站。
@@ -57,3 +62,6 @@ Denny 在 Chrome 使用 TradingView 看圖。本專案做一個個人用 Chrome 
 | 問題組合 | 四題：direction(choice)＋up_10_bars(noul)＋bull_trend(score)＋bear_trend(score)。2026-09-22 使用者實測後要求把原「趨勢強度」拆成**多頭趨勢強度／空頭趨勢強度**兩題（原 trend_strength 廢除） | 使用者明確要求 |
 | 使用方式 | 手動按鈕→一次預測，Side Panel 顯示 | 使用者明確選擇 |
 | 定位 | 個人工具，chrome://extensions 載入；好用再考慮上架 | 使用者明確選擇 |
+| Panel 設定入口 | 「⚙ 設定」按鈕＋no_key CTA（openOptionsPage） | 使用者明確要求（2026-09-22） |
+| 指標串接 | 自動偵測圖表使用中的指標（不寫死清單）；數值序列與 `bars` 設定同窗口對齊 | 使用者明確要求（2026-09-22） |
+| 指標名稱映射 | Panel 動態輸入框（預設自動偵測名稱、可改、失焦即存、持久化）；送 Jev 用自訂名稱、rawName 保留 | 使用者明確要求（2026-09-22） |

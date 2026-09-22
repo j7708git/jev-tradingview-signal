@@ -152,6 +152,13 @@ jev-tradingview-signal/
    對應要求：主圖 seriesKey 仍是 `sds_1`（不變），但**符號身分索引會跳號**；且**站內換商品時 `location.href` 的 `?symbol=` 不會更新**（真機實測仍顯示舊商品）→ **嚴禁以 URL 推斷當前商品**，唯一可信來源是主圖的 `symbol_resolved`。
 7. 換商品後的正確結果：`meta.symbol` 立即變為新商品、主圖緩衝為新商品的 `300 + 尾根`（**不含**舊商品任何 bar）。
 
+#### 4.2.2 指標（study）消費（二期；Task 12 取證後回寫定案，本節先立契約骨架）
+
+- 來源：`du` 的非 sds 鍵 `<studyId>:{st:[...]}`＋`study_loading`／`study_completed`（身分線索）——WS-NOTES §2 既有觀測。**只消費當前圖表使用中的 study**；不主動發任何幀（逃生門仍不實裝）。
+- 身分（雙層；**Task 12 已定案，詳 WS-NOTES §7**）：① 自動映射自**上行 `create_study`**（inject 包 `send` 時只讀記錄、絕不改動）：`pineId`（`%1`→空白）＋ `in_*`／具名參數排成「名稱(參數)」；② **使用者覆寫**（F10）：Panel 動態輸入框（預設＝①結果），自訂值存 `chrome.storage.local.studyNameMap`（持久化），**主鍵 `studyId`**（layout 持久）、失效 fallback `pineId|in_*` 簽章；`state.studies[].name` 取覆寫值、`rawName` 保留自動名稱。**禁止寫死指標清單**。
+- 對齊：每 study 數值序列與 `bars` 設定同窗口（預設 300）、依 time 對齊主圖 bars；warmup 無值根照實為 `null`。
+- ~~未知數~~ **Task 12 已全數定案（WS-NOTES §7，2026-09-22）**：①映射在上行 `create_study` 明文（pineId＋in_*）；② `st` 為完整逐根序列＋尾根增量，`v=[epoch秒,...1–4值]`，**以 `v[0]` 時間對齊 bars**；③ Pine 正文加密但身分/參數明文，自訂 Pine 可辨識；④ `studyId` 由 client 生成存 layout、跨 reload 穩定（TV 內部輔助除外）。
+
 ### 4.3 ChartBuffer（lib/chart-buffer.js）
 
 - `upsertBars(bars)`：以 `bars[i][0]`（epoch 秒）為 key 的 Map；重複 time 以數值欄位 merge（最後一根收盤價會持續刷新）。
@@ -173,7 +180,13 @@ jev-tradingview-signal/
     "columns": ["time","open","high","low","close","volume"],
     "bars": [[1690000000,1,2,0.5,1.5,100], ...],   // 列式，省 token
     "features": { "ma20": 63000.1, "ma50": 58000.2, "rsi14": 55.3,
-                  "momentumPct5": 2.1, "rangePct20": 8.4, "lastClose": 64000 }
+                  "momentumPct5": 2.1, "rangePct20": 8.4, "lastClose": 64000 },
+    "studies": [                       // 二期：圖表使用中的指標（可為 []）；形狀 Task 12 後定案
+      { "id": "51IoAU", "name": "ALMA25（可為使用者自訂名）", "rawName": "Arnaud Legoux Moving Average",
+        "params": { "in_0": 25, "in_1": 0.85, "in_2": 6 },
+        "columns": ["time","value"],
+        "values": [[1690000000, 63000.2], null] }   // 與 bars 同窗口對齊；無值根為 null
+    ]
   },
   "questions": {
     "direction": { "type": "choice",

@@ -178,10 +178,11 @@
 - [x] 完成紀錄：**2026-09-22 pi 執行，架構師親驗全綠**：`npm test` **152/152**（147＋5 新）、static-check task02/06/07/08 全 ALL PASS、verify-inject verdict PASS、git 無越界（僅 sidepanel 4 檔＋render.test）。真機點擊驗收（`scratch/diag-f8-click.mjs`，**6/6 PASS**）：⚙ 設定鈕存在（label「⚙ 設定」、class `ghost open-options`）→ 點擊真開出 options 分頁（openOptionsPage 生效）；no_key 錯誤盒 CTA「去設定 API key」在場、其他 kind 不含 CTA。
   - 實作要點：`OPEN_OPTIONS_CLASS/ACTION` 常數單一來源（render.js）；openOptionsPageSafe 靜默降級不拋錯；renderError 既有結構不變僅加 CTA。
 
-### [-] Task 12: study 協定取證 spike（架構師執行，不派工）🔄 2026-09-22 進行中
+### [x] Task 12: study 協定取證 spike（架構師執行，不派工）✅ 2026-09-22 ALL PASS
 - 目標：解開 §4.2.2 四未知數（studyId→名稱/參數映射、`st` 形狀、Pine 可辨識度、**識別鍵穩定性**——跨 reload／SPA 換符號是否重編號，決定 `studyNameMap` 鍵與持久化效果）；掛 EMA/RSI/布林的真機圖 dump 幀樣本。
 - 產出物：`tests/fixtures/ws-studies-real.txt`（去識別）＋`docs/WS-NOTES.md` §7＋§4.2.2 回寫定案。
 - 驗收：證明「名稱＋參數＋逐根數值」三者皆可得，或記錄不可得項的降級方案。
+- [x] 完成紀錄：**2026-09-22 架構師 browser-harness 真機取證（BTCUSDT 15m，BB30/ALMA25/ALMA90/VRVP/Vol/CMF20/BarSet 七研究），四未知數全數定案**——①身分/參數在**上行 create_study 明文**（pineId＋in_*／具名參數；Pine 原始碼加密但不需解密）；②`st`＝完整逐根序列＋尾根增量、`v=[epoch秒,...1–4值]`、時間對齊 bars；③built-in 全可辨識、自訂 Pine 有 pineId、非時序型（VRVP）st 恆空自動排除；④studyId 由 client 存 layout 跨 reload 穩定（7 個中 6 個不變，唯一換號為 TV 內部 BarSet）→ `studyNameMap` 主鍵＝studyId、fallback＝pineId|in_* 簽章。證據：`tests/fixtures/ws-studies-real.txt`＋WS-NOTES §7。
 
 ### [ ] Task 13: study 消費實作（ws-parse/inject/sw-core/state-builder）
 - 依 Task 12 定案契約派 pi；state.studies 對齊 `bars` 窗口，`name` 取 `studyNameMap` 覆寫值（無覆寫用自動名稱）、`rawName` 保留；未掛指標 `studies:[]` 零回歸。
