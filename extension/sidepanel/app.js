@@ -12,7 +12,10 @@ import {
   renderError,
   renderCounters,
   renderRingLog,
+  renderStudiesMeta,
+  applyStudyNameEdit,
   OPEN_OPTIONS_CLASS,
+  STUDY_INPUT_CLASS,
 } from './render.js';
 
 // §4.8.4：panel 命令一律引用 protocol.js 的 MSG 常數（不得散落字串）。
@@ -30,6 +33,8 @@ const resultEl = document.getElementById('result');
 const debugCountersEl = document.getElementById('debug-counters');
 const ringLogEl = document.getElementById('ring-log');
 const resyncBtn = document.getElementById('resync-btn');
+// Task 14／F10：指標映射折疊區內容容器（缺元素時整段降級為 no-op）。
+const studiesMapEl = document.getElementById('studies-map');
 
 /** 目前已知的圖表 tab id（用來只認自己 tab 的 PREDICTION_UPDATED）。 */
 let myTabId = null;
@@ -38,6 +43,10 @@ let predicting = false;
 let loadingStartedAt = 0;
 let loadingTicker = null;
 let model = 'jev-latest';
+// Task 14／F10：studyId→自訂名映射（storage 讀寫集中 app.js）；
+// studiesSig 用偵測到的 id 清單去重繪，避免輪詢時蓋掉輸入框焦點。
+let studyNameMap = {};
+let studiesSig = null;
 
 /** 以 callback 包 chrome.runtime.sendMessage，避開未處理的 promise rejection。 */
 function send(message) {
@@ -113,7 +122,67 @@ function applyState(state) {
   statusEl.innerHTML = renderStatus(state);
   // §4.8.5(a)：counters 一行（缺值顯示 0）。
   if (debugCountersEl) debugCountersEl.textContent = renderCounters(state.counters);
+  renderStudiesMap(state);
   syncControls();
+}
+
+/** Task 14／F10：自 storage 讀 studyNameMap（讀不到／壞型別一律空物件）。 */
+async function readStudyNameMap() {
+  try {
+    const got = await chrome.storage.local.get('studyNameMap');
+    const m = got && got.studyNameMap;
+    return m && typeof m === 'object' && !Array.isArray(m) ? m : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Task 14／F10：只寫 studyNameMap 一個鍵（不動 storage 其他鍵）。 */
+async function saveStudyNameMap() {
+  try {
+    await chrome.storage.local.set({ studyNameMap });
+  } catch {
+    /* 儲存失敗不讓 UI 崩（下次失焦可重試） */
+  }
+}
+
+/** Task 14／F10：把當前 studiesMeta 清單的 id 串成簽章（順序敏感）。 */
+function studiesSignature(list) {
+  return list
+    .map((s) => (s && s.id != null ? String(s.id) : ''))
+    .join('\u0000');
+}
+
+/** Task 14／F10：為映射輸入框綁失焦即存（沿用既有重新綁定模式）。 */
+function bindStudyInputs() {
+  if (!studiesMapEl) return;
+  const inputs = studiesMapEl.querySelectorAll(`.${STUDY_INPUT_CLASS}`);
+  for (const input of inputs) {
+    input.addEventListener('blur', onStudyNameBlur);
+  }
+}
+
+/** Task 14／F10：失焦即存；trim 後空字串＝刪鍵並回到自動名。 */
+async function onStudyNameBlur(event) {
+  const input = event && event.target;
+  if (!input) return;
+  const id = input.getAttribute('data-study-id') || '';
+  const autoName = input.getAttribute('data-auto-name') || '';
+  const trimmed = String(input.value == null ? '' : input.value).trim();
+  input.value = trimmed === '' ? autoName : trimmed;
+  studyNameMap = applyStudyNameEdit(studyNameMap, id, trimmed);
+  await saveStudyNameMap();
+}
+
+/** Task 14／F10：依 GET_STATE.studiesMeta 渲染映射區（id 清單未變則不重繪）。 */
+function renderStudiesMap(state) {
+  if (!studiesMapEl) return;
+  const list = state && Array.isArray(state.studiesMeta) ? state.studiesMeta : [];
+  const sig = studiesSignature(list);
+  if (sig === studiesSig) return;
+  studiesSig = sig;
+  studiesMapEl.innerHTML = renderStudiesMeta(list, studyNameMap);
+  bindStudyInputs();
 }
 
 /** §4.8.5(b)：取回 ring log 並渲染（新→舊；失敗降級不拋錯）。 */
@@ -259,9 +328,14 @@ if (resyncBtn) {
 // F8：header「⚙ 設定」與 no_key CTA 共用同一 handler（header 於此綁定一次）。
 bindOpenOptionsButtons();
 
-// 開啟：先讀 model，再立即 GET_STATE，之後每 2s 輪詢。
+// 開啟：先讀 model，再讀映射，之後每 2s 輪詢。
 readModel();
-void refresh();
+void (async () => {
+  studyNameMap = await readStudyNameMap();
+  // 映射載入後強制重繪一次（即使先前已用空映射畫過）。
+  studiesSig = null;
+  await refresh();
+})();
 setInterval(() => {
   void refresh();
 }, POLL_MS);

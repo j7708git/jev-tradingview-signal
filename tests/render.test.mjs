@@ -29,6 +29,11 @@ import {
   renderRingLog,
   renderRingLogRow,
   formatClock,
+  renderStudiesMeta,
+  renderStudiesSummary,
+  applyStudyNameEdit,
+  STUDY_INPUT_CLASS,
+  STUDIES_EMPTY_TEXT,
 } from '../extension/sidepanel/render.js';
 
 import {
@@ -577,4 +582,139 @@ test('TEST_KEY 一般 throw 也要正規化（kind=offhost），且非 panel 來
     { url: 'https://www.tradingview.com/chart/x', tab: { id: 9 } },
   );
   assert.equal(rejected, false);
+});
+
+// ─────────────────────────────────────────────────────────────
+// Task 14／F10：指標映射 UI＋done 結果區指標摘要（純函式）
+// ─────────────────────────────────────────────────────────────
+
+test('Task14 renderStudiesMeta：N 指標 N 輸入框，預設值＝自動名、帶 data-study-id／data-auto-name', () => {
+  const list = [
+    { id: 'sid1', name: 'ALMA(25)', rawName: 'Arnaud Legoux Moving Average' },
+    { id: 'sid2', name: 'Volume(20)', rawName: 'Volume' },
+  ];
+  const html = renderStudiesMeta(list);
+  assert.equal((html.match(new RegExp(STUDY_INPUT_CLASS, 'g')) || []).length, 2);
+  assert.match(html, /data-study-id="sid1"/);
+  assert.match(html, /data-study-id="sid2"/);
+  assert.match(html, /value="ALMA\(25\)"/);
+  assert.match(html, /value="Volume\(20\)"/);
+  assert.match(html, /data-auto-name="ALMA\(25\)"/);
+  assert.match(html, /data-auto-name="Volume\(20\)"/);
+});
+
+test('Task14 renderStudiesMeta：nameMap 覆寫優先；無覆寫用自動名；不改動傳入 map', () => {
+  const map = { sid1: '我的均線' };
+  const html = renderStudiesMeta(
+    [
+      { id: 'sid1', name: 'ALMA(25)' },
+      { id: 'sid2', name: 'Volume(20)' },
+    ],
+    map,
+  );
+  assert.match(html, /value="我的均線"/);
+  assert.match(html, /value="Volume\(20\)"/);
+  assert.deepEqual(map, { sid1: '我的均線' });
+});
+
+test('Task14 renderStudiesMeta：未偵測到指標／壞輸入 → 降級文案，不拋錯', () => {
+  assert.match(renderStudiesMeta([]), new RegExp(STUDIES_EMPTY_TEXT));
+  assert.match(renderStudiesMeta(null), new RegExp(STUDIES_EMPTY_TEXT));
+  assert.match(renderStudiesMeta(undefined), new RegExp(STUDIES_EMPTY_TEXT));
+  assert.doesNotThrow(() => renderStudiesMeta([{}]));
+  assert.doesNotThrow(() => renderStudiesMeta('x', 'bad-map'));
+});
+
+test('Task14 renderStudiesMeta：study id／name escape 不帶出標籤', () => {
+  const html = renderStudiesMeta([{ id: '<img src=x>', name: '"><b>x</b>' }]);
+  assert.doesNotMatch(html, /<img/);
+  assert.doesNotMatch(html, /<b>x<\/b>/);
+  assert.match(html, /&lt;img/);
+});
+
+test('Task14 applyStudyNameEdit：trim、空字串刪鍵、保留其他鍵、不改動原 map', () => {
+  const base = { a: 'A', b: 'B' };
+  assert.deepEqual(applyStudyNameEdit(base, 'a', '  X  '), { a: 'X', b: 'B' });
+  assert.deepEqual(applyStudyNameEdit(base, 'a', '   '), { b: 'B' });
+  assert.deepEqual(applyStudyNameEdit(base, 'c', 'C'), { a: 'A', b: 'B', c: 'C' });
+  assert.deepEqual(base, { a: 'A', b: 'B' }, '原 map 不得被改動');
+  assert.deepEqual(applyStudyNameEdit(null, 'a', 'A'), { a: 'A' });
+  assert.deepEqual(applyStudyNameEdit({ a: 1, b: 2 }, 'a', ''), { b: 2 });
+  assert.deepEqual(applyStudyNameEdit({ a: 'A' }, null, 'x'), { a: 'A' });
+});
+
+test('Task14 renderStudiesSummary：每指標一行（名稱＋末值＋值個數），空清單回空字串', () => {
+  const studies = [
+    { id: 's1', name: 'ALMA(25)', values: [[1, 10, 20], null, [3, 30, 40]] },
+    { id: 's2', name: 'Volume(20)', values: [null, null] },
+  ];
+  const html = renderStudiesSummary(studies);
+  assert.match(html, /本次附帶指標/);
+  assert.equal((html.match(/study-summary-row/g) || []).length, 2);
+  assert.match(html, /ALMA\(25\)/);
+  assert.match(html, /末值 30, 40/);
+  assert.match(html, /2 值/);
+  assert.match(html, /Volume\(20\)/);
+  assert.match(html, /0 值/);
+  assert.match(html, /末值 —/);
+  assert.equal(renderStudiesSummary([]), '');
+  assert.equal(renderStudiesSummary(undefined), '');
+  assert.doesNotThrow(() => renderStudiesSummary([{}]));
+});
+
+test('Task14 renderResult：done 結果區含指標摘要；無 indicators 不新增空區塊', () => {
+  const base = {
+    status: 'done',
+    answers: { direction: { choice: 'long', probabilities: { long: 1, neutral: 0, short: 0 } } },
+    usage: { input_tokens: 10 },
+    ms: 5,
+  };
+  const withStudies = renderResult({
+    ...base,
+    state: {
+      columns: ['time'],
+      bars: [[1, 2, 3, 4, 5, 6]],
+      studies: [{ id: 's1', name: 'ALMA(25)', values: [[1, 10], [2, 20]] }],
+    },
+  });
+  assert.match(withStudies, /本次附帶指標/);
+  assert.match(withStudies, /ALMA\(25\)/);
+  assert.match(withStudies, /末值 20/);
+  assert.match(withStudies, /2 值/);
+
+  const withoutStudies = renderResult({
+    ...base,
+    state: { columns: ['time'], bars: [[1, 2, 3, 4, 5, 6]], studies: [] },
+  });
+  assert.doesNotMatch(withoutStudies, /本次附帶指標/);
+  assert.doesNotThrow(() => renderResult({ ...base, state: undefined }));
+});
+
+test('Task14：sidepanel.html 有「指標映射」折疊區與容器；無 inline script／外部資源', () => {
+  const html = readFileSync(
+    new URL('../extension/sidepanel/sidepanel.html', import.meta.url),
+    'utf8',
+  );
+  assert.match(html, /指標映射/);
+  assert.match(html, /id="studies-map"/);
+  assert.match(html, /id="studies-map-block"/);
+  assert.doesNotMatch(html, /<script(?![^>]*src=)/);
+  assert.doesNotMatch(html, /https?:\/\//);
+});
+
+test('Task14：app.js 只寫 studyNameMap 一鍵；render.js 維持純函式不碰 chrome.*', () => {
+  const appSrc = readFileSync(
+    new URL('../extension/sidepanel/app.js', import.meta.url),
+    'utf8',
+  );
+  assert.match(appSrc, /chrome\.storage\.local\.get\('studyNameMap'\)/);
+  assert.match(appSrc, /chrome\.storage\.local\.set\(\{\s*studyNameMap\s*\}\)/);
+  assert.match(appSrc, /STUDY_INPUT_CLASS/);
+  assert.match(appSrc, /applyStudyNameEdit/);
+
+  const renderSrc = readFileSync(
+    new URL('../extension/sidepanel/render.js', import.meta.url),
+    'utf8',
+  );
+  assert.doesNotMatch(renderSrc, /\bchrome\.(?:runtime|storage|sidePanel|tabs)\b/);
 });

@@ -551,13 +551,43 @@ export function createDb(deps = {}) {
     return doPredict(tabId, entry);
   }
 
+  /**
+   * Task 14／F10：由 entry.studies 推映射 UI 要用的 studiesMeta。
+   * 重用注入的 buildStudies 命名（空 bars 只取 id/name/rawName/params，不產生 values），
+   * 與送 Jev 的 state.studies 同一套名稱邏輯（單一來源，不重寫命名）。
+   * 無 entry／無 study → []。
+   */
+  function studiesMetaFor(entry) {
+    if (!entry || !(entry.studies instanceof Map) || entry.studies.size === 0) return [];
+    const built = buildStudies(entry.studies, { bars: [] });
+    if (!Array.isArray(built)) return [];
+    return built.map((s) => ({
+      id: s.id,
+      name: s.name,
+      rawName: s.rawName,
+      params: s.params,
+    }));
+  }
+
   function getState(tabId) {
     if (tabId === undefined || tabId === null) {
-      return { status: 'idle', count: 0, counters: defaultCounters(), studiesCount: 0 };
+      return {
+        status: 'idle',
+        count: 0,
+        counters: defaultCounters(),
+        studiesCount: 0,
+        studiesMeta: [],
+      };
     }
     const entry = registry.get(tabId);
     if (!entry) {
-      return { status: 'idle', count: 0, counters: defaultCounters(), studiesCount: 0 };
+      return {
+        status: 'idle',
+        count: 0,
+        counters: defaultCounters(),
+        studiesCount: 0,
+        studiesMeta: [],
+      };
     }
     // 09e-3：SW 重啟後常見「首則訊息只有尾根」；若根數不足則主動要求全量重送
     // （不阻塞回應；面板下一輪輪詢即恢復）。預測進行中不動用 pending 以免干擾。
@@ -573,6 +603,8 @@ export function createDb(deps = {}) {
       counters: entry.counters ? { ...entry.counters } : defaultCounters(),
       // Task 13：除錯用；已掛載且有序列值的 study 數。
       studiesCount: entry.studies instanceof Map ? entry.studies.size : 0,
+      // Task 14／F10：映射 UI 用（id／自動名稱／rawName／params），其餘欄位不變。
+      studiesMeta: studiesMetaFor(entry),
       last: entry.last,
       meta: entry.meta,
     };

@@ -315,15 +315,15 @@ test('併發鎖：進行中第二次 RUN_PREDICTION 回 {ok:false,error:"busy"}'
   assert.equal(r2.ok, true);
 });
 
-test('GET_STATE 無 entry → {status:"idle",count:0,counters:{0,0}}', () => {
+test('GET_STATE 無 entry → {status:"idle",count:0,counters:{0,0},studiesMeta:[]}', () => {
   const db = createDb(makeHarness().deps);
   assert.deepEqual(
     db.handleRuntimeMessage({ v: 1, type: 'GET_STATE', tabId: 999 }, panelSender()),
-    { status: 'idle', count: 0, counters: { dropped: 0, ignoredSeriesFrames: 0 }, studiesCount: 0 },
+    { status: 'idle', count: 0, counters: { dropped: 0, ignoredSeriesFrames: 0 }, studiesCount: 0, studiesMeta: [] },
   );
   assert.deepEqual(
     db.handleRuntimeMessage({ v: 1, type: 'GET_STATE' }, panelSender()),
-    { status: 'idle', count: 0, counters: { dropped: 0, ignoredSeriesFrames: 0 }, studiesCount: 0 },
+    { status: 'idle', count: 0, counters: { dropped: 0, ignoredSeriesFrames: 0 }, studiesCount: 0, studiesMeta: [] },
   );
 });
 
@@ -678,7 +678,7 @@ test('§4.8.1 counters 捎帶：upsert 帶 counters → entry.counters 更新、
   // 未收到 upsert 前：預設 {0,0}。
   assert.deepEqual(
     db.handleRuntimeMessage({ v: 1, type: 'GET_STATE' }, panelSender()),
-    { status: 'idle', count: 0, counters: { dropped: 0, ignoredSeriesFrames: 0 }, studiesCount: 0 },
+    { status: 'idle', count: 0, counters: { dropped: 0, ignoredSeriesFrames: 0 }, studiesCount: 0, studiesMeta: [] },
   );
 
   db.handleRuntimeMessage(
@@ -1149,4 +1149,84 @@ test('Task13 RUN_PREDICTION：state.studies 與 bars 窗口對齊、nameMap 覆�
   );
   await db2.handleRuntimeMessage(run(2), panelSender());
   assert.deepEqual(h2.evaluateCalls[0].state.studies, []);
+});
+
+// ─────────────────────────────────────────────────────────────
+// Task 14／F10：GET_STATE.studiesMeta（映射 UI 資料來源）
+// ─────────────────────────────────────────────────────────────
+
+test('Task14 GET_STATE 攜帶 studiesMeta：id/name/rawName/params（buildStudies 同一命名）', () => {
+  const db = createDb(makeHarness().deps);
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'S', resolution: '1' }),
+    tvSender(1),
+  );
+  db.handleRuntimeMessage(
+    studiesUpsert(
+      {
+        '51IoAU': {
+          scriptName: 'ALMA@tv-basicstudies-1',
+          pineId: 'STD;Arnaud%1Legoux%1Moving%1Average',
+          params: { in_0: 25, in_1: 0.85 },
+        },
+        VOL: { scriptName: 'Volume@tv-basicstudies-277', params: { length: 20 } },
+      },
+      { '51IoAU': [[1000, 1], [1060, 2]], VOL: [[1000, 5]] },
+    ),
+    tvSender(1),
+  );
+
+  const summary = db.handleRuntimeMessage(
+    { v: 1, type: globalThis.MSG.GET_STATE, tabId: 1 },
+    panelSender(),
+  );
+  assert.equal(summary.studiesCount, 2);
+  assert.ok(Array.isArray(summary.studiesMeta));
+  assert.equal(summary.studiesMeta.length, 2);
+  const byId = Object.fromEntries(summary.studiesMeta.map((s) => [s.id, s]));
+  assert.equal(byId['51IoAU'].rawName, 'Arnaud Legoux Moving Average');
+  assert.equal(byId['51IoAU'].name, 'ALMA(25)');
+  assert.deepEqual(byId['51IoAU'].params, { in_0: 25, in_1: 0.85 });
+  assert.equal(byId.VOL.rawName, 'Volume');
+  assert.equal(byId.VOL.name, 'Volume(20)');
+  // 最小擴充：studiesMeta 只帶 UI 需要的身分欄位，不含 values/columns。
+  assert.equal('values' in byId['51IoAU'], false);
+  assert.equal('columns' in byId['51IoAU'], false);
+});
+
+test('Task14 GET_STATE studiesMeta：無指標 → []、storage 覆寫不影響（UI 端再套），gone 後移除', () => {
+  const h = makeHarness({ store: { studyNameMap: { sid: '自訂' } } });
+  const db = createDb(h.deps);
+  // 無 entry → []。
+  assert.deepEqual(
+    db.handleRuntimeMessage({ v: 1, type: globalThis.MSG.GET_STATE, tabId: 42 }, panelSender())
+      .studiesMeta,
+    [],
+  );
+  // 有 bars 無 studies → []。
+  db.handleRuntimeMessage(upsert(bars(1_000_000, 60), { symbol: 'S' }), tvSender(1));
+  assert.deepEqual(
+    db.handleRuntimeMessage({ v: 1, type: globalThis.MSG.GET_STATE, tabId: 1 }, panelSender())
+      .studiesMeta,
+    [],
+  );
+  // 有 study：studiesMeta.name 為自動名（GET_STATE 不讀 storage；輸入框預設值再由 UI 套覆寫）。
+  db.handleRuntimeMessage(
+    studiesUpsert({ sid: { scriptName: 'X@y', params: { in_0: 3 } } }, { sid: [[1000, 1]] }),
+    tvSender(1),
+  );
+  let meta = db.handleRuntimeMessage(
+    { v: 1, type: globalThis.MSG.GET_STATE, tabId: 1 },
+    panelSender(),
+  ).studiesMeta;
+  assert.equal(meta.length, 1);
+  assert.equal(meta[0].id, 'sid');
+  assert.equal(meta[0].name, 'X(3)');
+  // gone 移除後 studiesMeta 同步縮回 []。
+  db.handleRuntimeMessage(studiesUpsert({}, {}, ['sid']), tvSender(1));
+  meta = db.handleRuntimeMessage(
+    { v: 1, type: globalThis.MSG.GET_STATE, tabId: 1 },
+    panelSender(),
+  ).studiesMeta;
+  assert.deepEqual(meta, []);
 });

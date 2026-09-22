@@ -21,6 +21,12 @@ export const OPEN_OPTIONS_CLASS = 'open-options';
 /** F8：上述按鈕的 data-action 值（header 與 no_key CTA 共用同一識別）。 */
 export const OPEN_OPTIONS_ACTION = 'open-options';
 
+/** Task 14／F10：指標映射輸入框的共用 class（app.js 以此 class 綁定事件）。 */
+export const STUDY_INPUT_CLASS = 'study-name-input';
+
+/** Task 14／F10：未偵測到指標時的降級文案。 */
+export const STUDIES_EMPTY_TEXT = '未偵測到指標';
+
 /** 方向 → CSS class。 */
 export const DIRECTION_CLASS = {
   long: 'dir-long',
@@ -63,6 +69,117 @@ export function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+/**
+ * Task 14／F10：純函式套用一次名稱編輯（app.js 於失焦時呼叫，再落地 storage）。
+ * - 值 trim 後非空 → 設為該 studyId 的自訂名；
+ * - 值 trim 後為空字串 → 刪除該鍵（回到自動名）；
+ * - 不改動傳入物件，且保留其他既有鍵（不得清掉其他 study 的映射）。
+ * @param {Record<string,string>} nameMap 既有映射（studyId→自訂名）
+ * @param {string} id studyId
+ * @param {string} rawValue 輸入框原值
+ * @returns {Record<string,string>} 新映射
+ */
+export function applyStudyNameEdit(nameMap, id, rawValue) {
+  const base =
+    nameMap && typeof nameMap === 'object' && !Array.isArray(nameMap)
+      ? { ...nameMap }
+      : {};
+  if (id == null || String(id) === '') return base;
+  const key = String(id);
+  const value = rawValue == null ? '' : String(rawValue).trim();
+  if (value === '') delete base[key];
+  else base[key] = value;
+  return base;
+}
+
+/**
+ * Task 14／F10：渲染「指標映射」折疊區內容——每個偵測到的 study 一個文字輸入框。
+ * 預設值＝自動偵測名稱（`name`）；若 `nameMap[id]` 有已存自訂名則優先顯示。
+ * 無指標／壞輸入 → 顯示「未偵測到指標」，不拋錯。
+ *
+ * @param {Array<{id:string,name:string,rawName?:string,params?:object}>} studiesMeta
+ * @param {Record<string,string>} [nameMap] 已存映射（studyId→自訂名）
+ * @returns {string} HTML 字串
+ */
+export function renderStudiesMeta(studiesMeta, nameMap) {
+  const list = Array.isArray(studiesMeta) ? studiesMeta : [];
+  if (list.length === 0) {
+    return `<p class="studies-empty">${STUDIES_EMPTY_TEXT}</p>`;
+  }
+  const map =
+    nameMap && typeof nameMap === 'object' && !Array.isArray(nameMap) ? nameMap : {};
+  const rows = list.map((study) => {
+    const s = study && typeof study === 'object' ? study : {};
+    const id = s.id == null ? '' : String(s.id);
+    const auto = s.name == null ? '' : String(s.name);
+    const override = Object.prototype.hasOwnProperty.call(map, id) ? map[id] : undefined;
+    const value = typeof override === 'string' && override.length > 0 ? override : auto;
+    const rawName = s.rawName == null ? '' : String(s.rawName);
+    const hint = rawName && rawName !== auto ? rawName : auto;
+    return (
+      `<label class="study-map-row" data-study-id="${escapeHtml(id)}">` +
+      `<span class="study-map-auto" title="自動偵測名稱">${escapeHtml(hint)}</span>` +
+      `<input class="${STUDY_INPUT_CLASS}" type="text" ` +
+      `data-study-id="${escapeHtml(id)}" ` +
+      `data-auto-name="${escapeHtml(auto)}" ` +
+      `value="${escapeHtml(value)}" placeholder="${escapeHtml(auto)}" />` +
+      `</label>`
+    );
+  });
+  return `<div class="studies-map-list">${rows.join('')}</div>`;
+}
+
+/** 取 study 序列的最後一個非 null 值列與有效值個數（壞輸入不拋錯）。 */
+function studySeriesTail(study) {
+  const values = study && Array.isArray(study.values) ? study.values : [];
+  let count = 0;
+  let last = null;
+  for (const row of values) {
+    if (Array.isArray(row) && row.length > 1) {
+      count += 1;
+      last = row.slice(1);
+    }
+  }
+  return { count, last };
+}
+
+/** 值列 → 顯示文字（null／undefined 顯示「—」，其餘字串化）。 */
+function formatStudyValues(values) {
+  if (!Array.isArray(values) || values.length === 0) return '—';
+  return values.map((v) => (v == null ? '—' : String(v))).join(', ');
+}
+
+/**
+ * Task 14：done 結果區的本次附帶指標摘要（每指標一行：名稱＋末值＋值個數）。
+ * 無附帶指標 → 回空字串（不新增空區塊、不拋錯）。
+ *
+ * @param {Array<{id?:string,name?:string,values?:Array}>} studies `last.state.studies`
+ * @returns {string} HTML 字串
+ */
+export function renderStudiesSummary(studies) {
+  const list = Array.isArray(studies) ? studies : [];
+  if (list.length === 0) return '';
+  const rows = list.map((study) => {
+    const s = study && typeof study === 'object' ? study : {};
+    const id = s.id == null ? '' : String(s.id);
+    const name = s.name == null || s.name === '' ? id || '—' : String(s.name);
+    const { count, last } = studySeriesTail(s);
+    return (
+      `<li class="study-summary-row" data-study-id="${escapeHtml(id)}">` +
+      `<span class="study-summary-name">${escapeHtml(name)}</span>` +
+      `<span class="study-summary-last">末值 ${escapeHtml(formatStudyValues(last))}</span>` +
+      `<span class="study-summary-count">${count} 值</span>` +
+      `</li>`
+    );
+  });
+  return (
+    `<div class="studies-summary">` +
+    `<div class="studies-summary-title">本次附帶指標</div>` +
+    `<ul class="studies-summary-list">${rows.join('')}</ul>` +
+    `</div>`
+  );
 }
 
 /** 0..1 → 整數百分比；非有限數回 null。 */
@@ -247,6 +364,7 @@ export function renderResult(last, opts = {}) {
     renderProbabilities(direction.probabilities) +
     renderUp10(answers.up_10_bars) +
     renderTrend(answers) +
+    renderStudiesSummary(last.state && last.state.studies) +
     renderCost(last, opts.model) +
     renderDetails(last) +
     `<p class="disclaimer">${DISCLAIMER}</p>` +

@@ -359,6 +359,115 @@ body {
   color: var(--text-faint);
 }
 
+/* ── 指標映射（Task 14／F10）─────────────────────── */
+.studies-map {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+}
+
+.studies-map > summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.studies-map-body {
+  padding: 0 10px 10px;
+}
+
+.studies-empty {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.studies-map-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.study-map-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.study-map-auto {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  word-break: break-word;
+}
+
+.study-name-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.study-name-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ── 本次附帶指標摘要（Task 14）───────────────────── */
+.studies-summary {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+}
+
+.studies-summary-title {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.studies-summary-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.study-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.study-summary-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.study-summary-last {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.study-summary-count {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── loading / error ─────────────────────────────────── */
 .loading {
   display: flex;
