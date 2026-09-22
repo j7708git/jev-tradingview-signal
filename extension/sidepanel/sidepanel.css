@@ -44,8 +44,16 @@ body {
   background: var(--bg-elev);
 }
 
+.top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
 .brand {
-  margin: 0 0 4px;
+  margin: 0;
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -400,6 +408,11 @@ body {
 
 .error-msg {
   margin-top: 6px;
+}
+
+/* F8：no_key 錯誤盒內的設定 CTA（header ⚙ 鈕沿用 .ghost）。 */
+.error-box .open-options {
+  margin-top: 10px;
 }
 
 /* ── footer ───────────────────────────────────────────── */

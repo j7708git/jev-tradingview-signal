@@ -12,6 +12,7 @@ import {
   renderError,
   renderCounters,
   renderRingLog,
+  OPEN_OPTIONS_CLASS,
 } from './render.js';
 
 // §4.8.4：panel 命令一律引用 protocol.js 的 MSG 常數（不得散落字串）。
@@ -144,9 +145,30 @@ async function showDoneFromState() {
   if (!last) return;
   if (last.status === 'error') {
     resultEl.innerHTML = renderError(last.kind, last.message);
+    bindOpenOptionsButtons(resultEl);
   } else if (last.status === 'done') {
     resultEl.innerHTML = renderResult(last, { model });
     bindCopyButtons();
+  }
+}
+
+/** F8：開啟擴充設定頁；失敗一律靜默降級，不得拋錯（含 Promise rejection）。 */
+function openOptionsPageSafe() {
+  try {
+    const result = chrome.runtime.openOptionsPage();
+    if (result && typeof result.catch === 'function') {
+      result.catch(() => {});
+    }
+  } catch {
+    /* 極端情況下無法開啟時不讓 UI 崩 */
+  }
+}
+
+/** F8：沿用 bindCopyButtons 模式，為 root 內所有 .open-options 綁同一 handler。 */
+function bindOpenOptionsButtons(root = document) {
+  const buttons = root.querySelectorAll(`.${OPEN_OPTIONS_CLASS}`);
+  for (const button of buttons) {
+    button.addEventListener('click', openOptionsPageSafe);
   }
 }
 
@@ -204,6 +226,7 @@ async function onPredict() {
         : error && error.message;
     finishLoading();
     resultEl.innerHTML = renderError(kind, message);
+    bindOpenOptionsButtons(resultEl);
     return;
   }
   // 沒有直接回應時，交給 PREDICTION_UPDATED 廣播收尾。
@@ -232,6 +255,9 @@ if (resyncBtn) {
     void onResync();
   });
 }
+
+// F8：header「⚙ 設定」與 no_key CTA 共用同一 handler（header 於此綁定一次）。
+bindOpenOptionsButtons();
 
 // 開啟：先讀 model，再立即 GET_STATE，之後每 2s 輪詢。
 readModel();

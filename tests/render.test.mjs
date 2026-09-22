@@ -2,9 +2,13 @@
 // 只 import 純 ESM（render.js / sw-core.js），零 DOM、零 chrome.*、零真網路。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   DISCLAIMER,
+  OPEN_OPTIONS_CLASS,
+  OPEN_OPTIONS_ACTION,
+  renderOpenOptionsButton,
   COST_PER_INPUT_TOKEN,
   DIRECTION_CLASS,
   ERROR_MESSAGES,
@@ -258,6 +262,72 @@ test('renderError：中文訊息、kind 標籤、免責語', () => {
   assert.match(html, /API key 已被拒絕（401）/);
   assert.match(html, /auth_401/);
   assert.ok(html.includes(DISCLAIMER));
+});
+
+// ─────────────────────────────────────────────────────────────
+// F8：Panel 設定入口（⚙ 按鈕＋no_key CTA）
+// ─────────────────────────────────────────────────────────────
+
+test('F8：renderError(no_key) 含設定 CTA，其餘 kind 一律不含', () => {
+  const noKey = renderError('no_key', 'ignored');
+  assert.match(noKey, /去設定 API key/);
+  assert.match(noKey, new RegExp(`class="[^"]*${OPEN_OPTIONS_CLASS}`));
+  assert.match(noKey, new RegExp(`data-action="${OPEN_OPTIONS_ACTION}"`));
+
+  for (const kind of Object.keys(ERROR_MESSAGES)) {
+    if (kind === 'no_key') continue;
+    const html = renderError(kind, 'ignored');
+    assert.doesNotMatch(html, /去設定 API key/, `${kind} 不得有設定 CTA`);
+    assert.doesNotMatch(
+      html,
+      new RegExp(OPEN_OPTIONS_CLASS),
+      `${kind} 不得帶 ${OPEN_OPTIONS_CLASS} hook`,
+    );
+  }
+});
+
+test('F8：renderError 既有結構不變（error-box／title／kicker／msg／disclaimer）', () => {
+  const html = renderError('no_key', 'ignored');
+  for (const cls of ['error-box', 'error-title', 'error-kicker', 'error-msg', 'disclaimer']) {
+    assert.match(html, new RegExp(`class="${cls}"`), `缺少 ${cls}`);
+  }
+  assert.ok(html.includes(DISCLAIMER));
+});
+
+test('F8：renderOpenOptionsButton 純函式、共用 hook、文案 escape', () => {
+  const html = renderOpenOptionsButton('去設定 API key');
+  assert.match(html, new RegExp(`data-action="${OPEN_OPTIONS_ACTION}"`));
+  assert.match(html, new RegExp(OPEN_OPTIONS_CLASS));
+  assert.match(html, /去設定 API key/);
+  assert.doesNotMatch(renderOpenOptionsButton('<b>x</b>'), /<b>x<\/b>/);
+});
+
+test('F8：sidepanel.html 有 ⚙ 設定按鈕且掛同一 hook（無 inline script／外部資源）', () => {
+  const html = readFileSync(
+    new URL('../extension/sidepanel/sidepanel.html', import.meta.url),
+    'utf8',
+  );
+  assert.match(html, /⚙ 設定/);
+  assert.match(html, /id="open-options-btn"/);
+  assert.match(html, new RegExp(`data-action="${OPEN_OPTIONS_ACTION}"`));
+  assert.match(html, new RegExp(OPEN_OPTIONS_CLASS));
+  assert.doesNotMatch(html, /<script(?![^>]*src=)/);
+  assert.doesNotMatch(html, /https?:\/\//);
+});
+
+test('F8：app.js 經 openOptionsPage 開啟且以共用 class 綁定；render.js 不碰 chrome.*', () => {
+  const appSrc = readFileSync(
+    new URL('../extension/sidepanel/app.js', import.meta.url),
+    'utf8',
+  );
+  const renderSrc = readFileSync(
+    new URL('../extension/sidepanel/render.js', import.meta.url),
+    'utf8',
+  );
+  assert.match(appSrc, /chrome\.runtime\.openOptionsPage\s*\(/);
+  assert.match(appSrc, new RegExp(OPEN_OPTIONS_CLASS));
+  // render.js 為純函式：不得呼叫任何 chrome.* API（註解中的「零 chrome.*」不算）。
+  assert.doesNotMatch(renderSrc, /\bchrome\.(?:runtime|storage|sidePanel|tabs)\b/);
 });
 
 test('escapeHtml：標籤與引號被編碼', () => {

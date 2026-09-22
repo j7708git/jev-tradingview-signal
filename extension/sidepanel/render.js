@@ -15,6 +15,12 @@ export const DISCLAIMER = '僅供研究參考，不構成投資建議';
 /** 成本換算：$0.042 / 1M input tokens（引用 protocol.js 單一來源，前端重算防 last.cost 漂移）。 */
 export const COST_PER_INPUT_TOKEN = COST_USD_PER_MTOK / 1e6;
 
+/** F8：開啟擴充設定頁的共用 hook（app.js 以此 class 綁定單一 handler）。 */
+export const OPEN_OPTIONS_CLASS = 'open-options';
+
+/** F8：上述按鈕的 data-action 值（header 與 no_key CTA 共用同一識別）。 */
+export const OPEN_OPTIONS_ACTION = 'open-options';
+
 /** 方向 → CSS class。 */
 export const DIRECTION_CLASS = {
   long: 'dir-long',
@@ -257,14 +263,25 @@ export function renderLoading(seconds = 0) {
   );
 }
 
+/** F8：設定入口按鈕（header 與 no_key CTA 共用同一 class／data-action hook）。 */
+export function renderOpenOptionsButton(label) {
+  return (
+    `<button type="button" class="ghost ${OPEN_OPTIONS_CLASS}" ` +
+    `data-action="${OPEN_OPTIONS_ACTION}">${escapeHtml(label)}</button>`
+  );
+}
+
 /** error 狀態（kind → 中文訊息，未知 kind 先過 redact 檢查）。 */
 export function renderError(kind, message) {
   const safeKind = kind == null ? 'error' : String(kind);
+  // F8：僅 no_key 錯誤態提供設定入口 CTA；其餘 kind 不得出現。
+  const cta = safeKind === 'no_key' ? renderOpenOptionsButton('去設定 API key') : '';
   return (
     `<div class="error-box">` +
     `<div class="error-title">預測失敗</div>` +
     `<div class="error-kicker">${escapeHtml(safeKind)}</div>` +
     `<div class="error-msg">${escapeHtml(errorMsg(kind, message))}</div>` +
+    cta +
     `<p class="disclaimer">${DISCLAIMER}</p></div>`
   );
 }

@@ -169,10 +169,32 @@
 
 ---
 
+## Phase 4 — 第二期優化（2026-09-22 使用者需求：設定入口＋指標串接）
+
+### [x] Task 11: Panel 設定入口（⚙ 按鈕＋no_key CTA）✅ 2026-09-22（pi）
+- 目標：F8。Panel「⚙ 設定」→ `chrome.runtime.openOptionsPage()`（無新權限）；renderError 的 no_key 態帶同一 CTA。
+- Target Files: `extension/sidepanel/*`、`tests/render.test.mjs`。
+- 驗收：`npm test` 全綠；static-check task08 過；真機點擊開設定頁。
+- [x] 完成紀錄：**2026-09-22 pi 執行，架構師親驗全綠**：`npm test` **152/152**（147＋5 新）、static-check task02/06/07/08 全 ALL PASS、verify-inject verdict PASS、git 無越界（僅 sidepanel 4 檔＋render.test）。真機點擊驗收（`scratch/diag-f8-click.mjs`，**6/6 PASS**）：⚙ 設定鈕存在（label「⚙ 設定」、class `ghost open-options`）→ 點擊真開出 options 分頁（openOptionsPage 生效）；no_key 錯誤盒 CTA「去設定 API key」在場、其他 kind 不含 CTA。
+  - 實作要點：`OPEN_OPTIONS_CLASS/ACTION` 常數單一來源（render.js）；openOptionsPageSafe 靜默降級不拋錯；renderError 既有結構不變僅加 CTA。
+
+### [-] Task 12: study 協定取證 spike（架構師執行，不派工）🔄 2026-09-22 進行中
+- 目標：解開 §4.2.2 四未知數（studyId→名稱/參數映射、`st` 形狀、Pine 可辨識度、**識別鍵穩定性**——跨 reload／SPA 換符號是否重編號，決定 `studyNameMap` 鍵與持久化效果）；掛 EMA/RSI/布林的真機圖 dump 幀樣本。
+- 產出物：`tests/fixtures/ws-studies-real.txt`（去識別）＋`docs/WS-NOTES.md` §7＋§4.2.2 回寫定案。
+- 驗收：證明「名稱＋參數＋逐根數值」三者皆可得，或記錄不可得項的降級方案。
+
+### [ ] Task 13: study 消費實作（ws-parse/inject/sw-core/state-builder）
+- 依 Task 12 定案契約派 pi；state.studies 對齊 `bars` 窗口，`name` 取 `studyNameMap` 覆寫值（無覆寫用自動名稱）、`rawName` 保留；未掛指標 `studies:[]` 零回歸。
+
+### [ ] Task 14: Panel 呈現 studies＋真機 e2e 驗收
+- Panel 指標名稱映射 UI（F10）：動態輸入框、預設＝自動偵測名稱、失焦即存、持久化；＋payload/結果區顯示附帶指標；真機掛指標圖 e2e；成本複驗 ≤$0.005/次。
+
+---
+
 ## 依賴圖（串行順序）
 
 ```
-01 → 02 → 03 → 04 → 05 → 06 → 07 → 08 → 09 → (10)
+01 → 02 → 03 → 04 → 05 → 06 → 07 → 08 → 09 → 10 → 11 → 12 → 13 → 14
 ```
 
 任何任務驗收失敗：根因編號寫進本檔該任務的「完成紀錄」，發最小修補 prompt（pi 用 `pi -c` 續接），不整模組重寫。
