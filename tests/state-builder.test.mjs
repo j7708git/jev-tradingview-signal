@@ -8,6 +8,7 @@ import {
   QUESTIONS,
   buildState,
   buildStudies,
+  normalizeStudyExclude,
   estimateTokens,
   fitStateToBudget,
   INPUT_BUDGET_CHARS,
@@ -314,6 +315,61 @@ test('buildStudies: 同窗口缺值根補 null（與 state.bars 窗口逐位對�
 });
 
 // ─────────────────────────────────────────────────────────────
+// Task 15／F11：buildStudies opts.exclude（被排除者不進 payload）
+// ─────────────────────────────────────────────────────────────
+
+test('Task15 buildStudies: exclude（陣列/Set）過濾被排除者，其餘零改動；全排除→[]', () => {
+  const bars = [
+    [1000, 1, 1, 1, 1, 1],
+    [1060, 2, 2, 2, 2, 2],
+    [1120, 3, 3, 3, 3, 3],
+  ];
+  const studies = new Map([
+    ['a', studyRec({ scriptName: 'A@x', params: { length: 10 } }, [[1000, [1]], [1120, [3]]])],
+    ['b', studyRec({ scriptName: 'B@x', params: { length: 20 } }, [[1000, [2]], [1120, [4]]])],
+    ['c', studyRec({ scriptName: 'C@x', params: { length: 30 } }, [[1060, [5]]])],
+  ]);
+  const base = buildStudies(studies, { bars });
+  assert.equal(base.length, 3);
+
+  const arr = buildStudies(studies, { bars, exclude: ['b'] });
+  assert.deepEqual(arr.map((s) => s.id), ['a', 'c']);
+  assert.deepEqual(arr[0], base.find((s) => s.id === 'a'), '未排除者逐位元不變');
+  assert.deepEqual(arr[1], base.find((s) => s.id === 'c'), '未排除者逐位元不變');
+
+  const set = buildStudies(studies, { bars, exclude: new Set(['a', 'c']) });
+  assert.deepEqual(set.map((s) => s.id), ['b']);
+
+  // 全部排除＝studies:[]（同未掛指標語意）。
+  assert.deepEqual(buildStudies(studies, { bars, exclude: ['a', 'b', 'c'] }), []);
+  assert.deepEqual(buildStudies(studies, { bars, exclude: new Set(['a', 'b', 'c']) }), []);
+
+  // 未傳 exclude／空集／壞型別 → 與基準逐位元相同（零回歸）。
+  const before = JSON.stringify(base);
+  for (const ex of [undefined, null, [], new Set(), 42, 'b', { b: true }, ['a', 5]]) {
+    const out = buildStudies(studies, { bars, exclude: ex });
+    assert.equal(JSON.stringify(out), before, `exclude=${String(ex)} 應零改動（壞型別）`);
+  }
+
+  // 重複 id 去重不影響結果。
+  assert.deepEqual(
+    buildStudies(studies, { bars, exclude: ['b', 'b', 'b'] }).map((s) => s.id),
+    ['a', 'c'],
+  );
+});
+
+test('Task15 normalizeStudyExclude：非陣列/Set、含非字串→[]；去重、略過空字串', () => {
+  assert.deepEqual(normalizeStudyExclude(['a', 'a', 'b', '']), ['a', 'b']);
+  assert.deepEqual(normalizeStudyExclude(new Set(['a', 'a', 'b'])), ['a', 'b']);
+  assert.deepEqual(normalizeStudyExclude(['a', 5]), [], '含非字串→[]');
+  assert.deepEqual(normalizeStudyExclude(new Set(['a', 5])), [], 'Set 含非字串→[]');
+  assert.deepEqual(normalizeStudyExclude('a'), []);
+  assert.deepEqual(normalizeStudyExclude({ a: 1 }), []);
+  assert.deepEqual(normalizeStudyExclude(null), []);
+  assert.deepEqual(normalizeStudyExclude(undefined), []);
+});
+
+// ─────────────────────────────────────────────────────────────
 // Task 14fix：fitStateToBudget 輸入預算守門
 // ─────────────────────────────────────────────────────────────
 
@@ -450,4 +506,28 @@ test('fitStateToBudget: 無 studies 可裁時原樣回傳；budgetChars 可注�
   // 注入極小預算：仍不能憑空縮 bars → 原樣。
   const withEmpty = { ...state, studies: [] };
   assert.equal(fitStateToBudget(withEmpty, { budgetChars: 10 }), withEmpty);
+});
+
+test('Task15 排除先於預算裁剪：被排除者不吃預算 → fitStateToBudget 不裁剪', () => {
+  const state = buildState(snapshot(), { bars: 300, features: false, now: NOW });
+  const ids = [...fullStudiesMap(9).keys()];
+
+  // 前置：9 個全窗 study 一定超預算。
+  state.studies = buildStudies(fullStudiesMap(9), { bars: state.bars });
+  assert.ok(payloadLen(state) > INPUT_BUDGET_CHARS, '前置：9 studies 必須超標');
+
+  // 排除 7 個 → 剩 2 個即落入預算；預算裁剪不得發生。
+  state.studies = buildStudies(fullStudiesMap(9), {
+    bars: state.bars,
+    exclude: ids.slice(0, 7),
+  });
+  assert.equal(state.studies.length, 2);
+  assert.ok(
+    payloadLen(state) <= INPUT_BUDGET_CHARS,
+    '排除後應已落回預算（被排除者不吃預算）',
+  );
+  const out = fitStateToBudget(state);
+  assert.equal(out, state, '未超標須回傳同一 state');
+  assert.equal('studiesTrimmed' in out, false, '不得觸發裁剪');
+  for (const s of out.studies) assert.equal(s.values.length, 300, '完整 300 窗未裁');
 });

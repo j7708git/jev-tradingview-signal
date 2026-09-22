@@ -14,8 +14,13 @@ import {
   renderRingLog,
   renderStudiesMeta,
   applyStudyNameEdit,
+  normalizeStudyExclude,
+  applyStudyExcludeAdd,
+  applyStudyExcludeRemove,
   OPEN_OPTIONS_CLASS,
   STUDY_INPUT_CLASS,
+  STUDY_REMOVE_CLASS,
+  STUDY_RESTORE_CLASS,
 } from './render.js';
 
 // §4.8.4：panel 命令一律引用 protocol.js 的 MSG 常數（不得散落字串）。
@@ -43,9 +48,11 @@ let predicting = false;
 let loadingStartedAt = 0;
 let loadingTicker = null;
 let model = 'jev-latest';
-// Task 14／F10：studyId→自訂名映射（storage 讀寫集中 app.js）；
-// studiesSig 用偵測到的 id 清單去重繪，避免輪詢時蓋掉輸入框焦點。
+// Task 14／F10：studyId→自訂名映射（storage 讀寫集中 app.js）。
 let studyNameMap = {};
+// Task 15／F11：被排除（不進 payload）的 studyId 陣列（storage 讀寫集中 app.js）。
+let studyExclude = [];
+// studiesSig 用偵測到的 id 清單＋排除集去重繪，避免輪詢時蓋掉輸入框焦點。
 let studiesSig = null;
 
 /** 以 callback 包 chrome.runtime.sendMessage，避開未處理的 promise rejection。 */
@@ -146,11 +153,13 @@ async function saveStudyNameMap() {
   }
 }
 
-/** Task 14／F10：把當前 studiesMeta 清單的 id 串成簽章（順序敏感）。 */
+/** Task 14／F10：把當前 studiesMeta 清單的 id 串成簽章（順序敏感）。
+ *  Task 15／F11：一併納入排除集，排除狀態變更時強制重繪。 */
 function studiesSignature(list) {
-  return list
+  const ids = list
     .map((s) => (s && s.id != null ? String(s.id) : ''))
     .join('\u0000');
+  return `${ids}\u0001${studyExclude.join('\u0000')}`;
 }
 
 /** Task 14／F10：為映射輸入框綁失焦即存（沿用既有重新綁定模式）。 */
@@ -159,6 +168,17 @@ function bindStudyInputs() {
   const inputs = studiesMapEl.querySelectorAll(`.${STUDY_INPUT_CLASS}`);
   for (const input of inputs) {
     input.addEventListener('blur', onStudyNameBlur);
+  }
+}
+
+/** Task 15／F11：為「✕」刪除鈕與「復原」鈕綁事件（每次重繪後重綁）。 */
+function bindStudyExcludeButtons() {
+  if (!studiesMapEl) return;
+  for (const btn of studiesMapEl.querySelectorAll(`.${STUDY_REMOVE_CLASS}`)) {
+    btn.addEventListener('click', onStudyRemoveClick);
+  }
+  for (const btn of studiesMapEl.querySelectorAll(`.${STUDY_RESTORE_CLASS}`)) {
+    btn.addEventListener('click', onStudyRestoreClick);
   }
 }
 
@@ -174,15 +194,58 @@ async function onStudyNameBlur(event) {
   await saveStudyNameMap();
 }
 
-/** Task 14／F10：依 GET_STATE.studiesMeta 渲染映射區（id 清單未變則不重繪）。 */
+/** Task 14／F10：依 GET_STATE.studiesMeta 渲染映射區（id 清單／排除集未變則不重繪）。
+ *  Task 15／F11：被排除者不進主列表，改列於「已排除（N）」小區。 */
 function renderStudiesMap(state) {
   if (!studiesMapEl) return;
   const list = state && Array.isArray(state.studiesMeta) ? state.studiesMeta : [];
   const sig = studiesSignature(list);
   if (sig === studiesSig) return;
   studiesSig = sig;
-  studiesMapEl.innerHTML = renderStudiesMeta(list, studyNameMap);
+  studiesMapEl.innerHTML = renderStudiesMeta(list, studyNameMap, studyExclude);
   bindStudyInputs();
+  bindStudyExcludeButtons();
+}
+
+/** Task 15／F11：自 storage 讀 studyExclude（壞型別→[]；只讀這一個鍵）。 */
+async function readStudyExclude() {
+  try {
+    const got = await chrome.storage.local.get('studyExclude');
+    return normalizeStudyExclude(got && got.studyExclude);
+  } catch {
+    return [];
+  }
+}
+
+/** Task 15／F11：只寫 studyExclude 一個鍵（不動 storage 其他鍵）。 */
+async function saveStudyExclude() {
+  try {
+    await chrome.storage.local.set({ studyExclude });
+  } catch {
+    /* 儲存失敗不讓 UI 崩（下次操作可重試） */
+  }
+}
+
+/** Task 15／F11：點「✕」→ 該 studyId 進排除集並持久化；自訂名不受影響。 */
+async function onStudyRemoveClick(event) {
+  const btn = event && event.target;
+  if (!btn) return;
+  if (typeof event.preventDefault === 'function') event.preventDefault();
+  const id = btn.getAttribute('data-study-id') || '';
+  studyExclude = applyStudyExcludeAdd(studyExclude, id);
+  await saveStudyExclude();
+  renderStudiesMap(currentState);
+}
+
+/** Task 15／F11：點「復原」→ 移出排除集並持久化；回主列表。 */
+async function onStudyRestoreClick(event) {
+  const btn = event && event.target;
+  if (!btn) return;
+  if (typeof event.preventDefault === 'function') event.preventDefault();
+  const id = btn.getAttribute('data-study-id') || '';
+  studyExclude = applyStudyExcludeRemove(studyExclude, id);
+  await saveStudyExclude();
+  renderStudiesMap(currentState);
 }
 
 /** §4.8.5(b)：取回 ring log 並渲染（新→舊；失敗降級不拋錯）。 */
@@ -328,11 +391,12 @@ if (resyncBtn) {
 // F8：header「⚙ 設定」與 no_key CTA 共用同一 handler（header 於此綁定一次）。
 bindOpenOptionsButtons();
 
-// 開啟：先讀 model，再讀映射，之後每 2s 輪詢。
+// 開啟：先讀 model，再讀映射／排除集，之後每 2s 輪詢。
 readModel();
 void (async () => {
   studyNameMap = await readStudyNameMap();
-  // 映射載入後強制重繪一次（即使先前已用空映射畫過）。
+  studyExclude = await readStudyExclude();
+  // 映射／排除集載入後強制重繪一次（即使先前已用空狀態畫過）。
   studiesSig = null;
   await refresh();
 })();

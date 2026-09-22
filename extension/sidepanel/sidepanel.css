@@ -419,6 +419,89 @@ body {
   border-color: var(--accent);
 }
 
+/* ── 指標刪除（排除）鈕與已排除區（Task 15／F11）────── */
+.study-map-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.study-map-head .study-map-auto {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.study-remove-btn {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.study-remove-btn:hover {
+  border-color: var(--short);
+  color: var(--short);
+}
+
+.studies-excluded {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.studies-excluded-title {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.studies-excluded-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.study-excluded-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.study-excluded-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.study-restore-btn {
+  flex: 0 0 auto;
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.study-restore-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
 /* ── 本次附帶指標摘要（Task 14）───────────────────── */
 .studies-summary {
   margin-top: 12px;

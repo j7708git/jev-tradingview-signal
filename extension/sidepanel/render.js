@@ -5,6 +5,9 @@
 
 // 09e-2：門檻單一來源（protocol.js 為雙相容無 export，靠 side-effect 填充 globalThis）。
 import '../lib/protocol.js';
+// Task 15／F11：排除集正規化單一來源在 lib（UI 與 SW 共用同一份防呆邏輯）。
+import { normalizeStudyExclude } from '../lib/state-builder.js';
+export { normalizeStudyExclude };
 const PREDICT_MIN_BARS = globalThis.PREDICT_MIN_BARS;
 // §4.8.2：成本單價單一來源（USD / 1M input tokens）。
 const COST_USD_PER_MTOK = globalThis.COST_USD_PER_MTOK;
@@ -24,8 +27,51 @@ export const OPEN_OPTIONS_ACTION = 'open-options';
 /** Task 14／F10：指標映射輸入框的共用 class（app.js 以此 class 綁定事件）。 */
 export const STUDY_INPUT_CLASS = 'study-name-input';
 
-/** Task 14／F10：未偵測到指標時的降級文案。 */
+/** Task 15／F11：映射列「✕」刪除（排除）鈕的共用 class。 */
+export const STUDY_REMOVE_CLASS = 'study-remove-btn';
+
+/** Task 15／F11：已排除區「復原」鈕的共用 class。 */
+export const STUDY_RESTORE_CLASS = 'study-restore-btn';
+
+/** Task 15／F11：已排除區容器 class（muted 樣式）。 */
+export const STUDIES_EXCLUDED_CLASS = 'studies-excluded';
+
+/** Task 15／F11：刪除鈕 aria-label／title 文案（繁中）。 */
+export const STUDY_REMOVE_LABEL = '排除此指標';
+
+/** Task 15／F11：復原鈕 aria-label／title 文案（繁中）。 */
+export const STUDY_RESTORE_LABEL = '復原此指標';
+
+/** Task 15／F11：未偵測到指標時的降級文案。 */
 export const STUDIES_EMPTY_TEXT = '未偵測到指標';
+
+/**
+ * Task 15／F11：純函式把 studyId 加入排除集（回傳新陣列，不改動輸入）。
+ * 已在集中／id 無效 → 原樣（已正規化）回傳。
+ * @param {unknown} exclude 既有排除集（陣列；壞型別當 []）
+ * @param {string} id studyId
+ * @returns {string[]} 新排除集
+ */
+export function applyStudyExcludeAdd(exclude, id) {
+  const base = normalizeStudyExclude(exclude);
+  if (id == null) return base;
+  const key = String(id);
+  if (key === '' || base.includes(key)) return base;
+  return [...base, key];
+}
+
+/**
+ * Task 15／F11：純函式把 studyId 移出排除集（回傳新陣列，不改動輸入）。
+ * @param {unknown} exclude 既有排除集（陣列；壞型別當 []）
+ * @param {string} id studyId
+ * @returns {string[]} 新排除集
+ */
+export function applyStudyExcludeRemove(exclude, id) {
+  const base = normalizeStudyExclude(exclude);
+  if (id == null) return base;
+  const key = String(id);
+  return base.filter((x) => x !== key);
+}
 
 /** 方向 → CSS class。 */
 export const DIRECTION_CLASS = {
@@ -99,22 +145,32 @@ export function applyStudyNameEdit(nameMap, id, rawValue) {
 }
 
 /**
- * Task 14／F10：渲染「指標映射」折疊區內容——每個偵測到的 study 一個文字輸入框。
- * 預設值＝自動偵測名稱（`name`）；若 `nameMap[id]` 有已存自訂名則優先顯示。
- * 無指標／壞輸入 → 顯示「未偵測到指標」，不拋錯。
+ * Task 14／F10＋Task 15／F11：渲染「指標映射」折疊區內容。
+ * - 每個未被排除的 study 一列：自動名提示＋文字輸入框（預設值＝自動名，
+ *   `nameMap[id]` 有自訂名則優先）＋「✕」刪除鈕；
+ * - 被排除者不進主列表，改列於下方「已排除（N）」muted 小區（名稱＋復原鈕）；
+ * - 已排除但已不在 `studiesMeta` 的 id 不顯示（storage 殘留無害）；
+ * - 全部排除 → 主列表降級顯示「未偵測到指標」，已排除區仍列 N 筆；
+ * - 無指標／壞輸入 → 只顯示「未偵測到指標」，不渲染刪除鈕／已排除區，不拋錯。
  *
  * @param {Array<{id:string,name:string,rawName?:string,params?:object}>} studiesMeta
  * @param {Record<string,string>} [nameMap] 已存映射（studyId→自訂名）
+ * @param {string[]} [exclude] 已排除 studyId 集（壞型別當 []）
  * @returns {string} HTML 字串
  */
-export function renderStudiesMeta(studiesMeta, nameMap) {
+export function renderStudiesMeta(studiesMeta, nameMap, exclude) {
   const list = Array.isArray(studiesMeta) ? studiesMeta : [];
   if (list.length === 0) {
     return `<p class="studies-empty">${STUDIES_EMPTY_TEXT}</p>`;
   }
   const map =
     nameMap && typeof nameMap === 'object' && !Array.isArray(nameMap) ? nameMap : {};
-  const rows = list.map((study) => {
+  const excluded = new Set(normalizeStudyExclude(exclude));
+
+  const includedRows = [];
+  const excludedRows = [];
+
+  for (const study of list) {
     const s = study && typeof study === 'object' ? study : {};
     const id = s.id == null ? '' : String(s.id);
     const auto = s.name == null ? '' : String(s.name);
@@ -122,17 +178,52 @@ export function renderStudiesMeta(studiesMeta, nameMap) {
     const value = typeof override === 'string' && override.length > 0 ? override : auto;
     const rawName = s.rawName == null ? '' : String(s.rawName);
     const hint = rawName && rawName !== auto ? rawName : auto;
-    return (
-      `<label class="study-map-row" data-study-id="${escapeHtml(id)}">` +
-      `<span class="study-map-auto" title="自動偵測名稱">${escapeHtml(hint)}</span>` +
-      `<input class="${STUDY_INPUT_CLASS}" type="text" ` +
-      `data-study-id="${escapeHtml(id)}" ` +
-      `data-auto-name="${escapeHtml(auto)}" ` +
-      `value="${escapeHtml(value)}" placeholder="${escapeHtml(auto)}" />` +
-      `</label>`
+
+    if (excluded.has(id)) {
+      const label = value !== '' ? value : id !== '' ? id : '—';
+      excludedRows.push(
+        `<li class="study-excluded-row" data-study-id="${escapeHtml(id)}">` +
+          `<span class="study-excluded-name">${escapeHtml(label)}</span>` +
+          `<button type="button" class="${STUDY_RESTORE_CLASS}" ` +
+          `data-study-id="${escapeHtml(id)}" ` +
+          `aria-label="${STUDY_RESTORE_LABEL}" ` +
+          `title="${STUDY_RESTORE_LABEL}">復原</button>` +
+          `</li>`,
+      );
+      continue;
+    }
+
+    includedRows.push(
+      `<div class="study-map-row" data-study-id="${escapeHtml(id)}">` +
+        `<div class="study-map-head">` +
+        `<span class="study-map-auto" title="自動偵測名稱">${escapeHtml(hint)}</span>` +
+        `<button type="button" class="${STUDY_REMOVE_CLASS}" ` +
+        `data-study-id="${escapeHtml(id)}" ` +
+        `aria-label="${STUDY_REMOVE_LABEL}" ` +
+        `title="${STUDY_REMOVE_LABEL}">✕</button>` +
+        `</div>` +
+        `<input class="${STUDY_INPUT_CLASS}" type="text" ` +
+        `data-study-id="${escapeHtml(id)}" ` +
+        `data-auto-name="${escapeHtml(auto)}" ` +
+        `value="${escapeHtml(value)}" placeholder="${escapeHtml(auto)}" />` +
+        `</div>`,
     );
-  });
-  return `<div class="studies-map-list">${rows.join('')}</div>`;
+  }
+
+  const mainHtml =
+    includedRows.length > 0
+      ? `<div class="studies-map-list">${includedRows.join('')}</div>`
+      : `<p class="studies-empty">${STUDIES_EMPTY_TEXT}</p>`;
+
+  const excludedHtml =
+    excludedRows.length > 0
+      ? `<div class="${STUDIES_EXCLUDED_CLASS}">` +
+        `<div class="studies-excluded-title">已排除（${excludedRows.length}）</div>` +
+        `<ul class="studies-excluded-list">${excludedRows.join('')}</ul>` +
+        `</div>`
+      : '';
+
+  return mainHtml + excludedHtml;
 }
 
 /** 取 study 序列的最後一個非 null 值列與有效值個數（壞輸入不拋錯）。 */

@@ -67,6 +67,29 @@ function toLocalIso(date) {
 }
 
 /**
+ * F11／Task 15：把任意輸入正規化為去重、僅含非空字串的 studyId 陣列（單一來源）。
+ * 接受字串陣列或 Set；防呆契約：非兩者、或任一元素非字串 → 一律當 `[]`
+ * （壞型別不半套套用）；空字串元素略過；重複 id 去重（保留首次出現順序）。不得拋錯。
+ * @param {unknown} value
+ * @returns {string[]}
+ */
+export function normalizeStudyExclude(value) {
+  const source = value instanceof Set ? [...value] : value;
+  if (!Array.isArray(source)) return [];
+  for (const raw of source) {
+    if (typeof raw !== 'string') return [];
+  }
+  const out = [];
+  const seen = new Set();
+  for (const raw of source) {
+    if (raw === '' || seen.has(raw)) continue;
+    seen.add(raw);
+    out.push(raw);
+  }
+  return out;
+}
+
+/**
  * 由 ChartBuffer snapshot 組出 systemone `state`。
  *
  * 流程：過濾非 6 欄根（記入 warnings）→ 截尾最近 `opts.bars` 根 → 算特徵。
@@ -187,21 +210,26 @@ function autoStudyName(rawName, params, fallbackId) {
  * - `values` 與 `opts.bars` 同一窗口逐根對齊；該 study 缺值的根補 `null`；
  * - `columns` 通用 `['time','v1',…]`（多圖指標 BB＝v1..v3）；
  * - `name` 優先 `opts.nameMap[id]`，否則自動名稱；`rawName` 保留自動名稱；
+ * - F11／Task 15：`opts.exclude`（Set 或字串陣列）內的 studyId 一律略過（不進 payload）；
+ *   過濾發生在本函式內、早於 `fitStateToBudget` 的預算裁剪（被排除者不吃預算）；
  * - `params` 原樣帶出；空序列的 study 直接略過（未掛指標 → `[]`）。
  *
  * @param {Map<string, {meta:object, series:Map<number, number[]>}>} studiesMap
- * @param {{bars?:number[][], nameMap?:Record<string,string>}} [opts]
+ * @param {{bars?:number[][], nameMap?:Record<string,string>, exclude?:Set<string>|string[]}} [opts]
  * @returns {Array<{id:string,name:string,rawName:string,params:object,columns:string[],values:(number[]|null)[]}>}
  */
 export function buildStudies(studiesMap, opts = {}) {
   const bars = opts && Array.isArray(opts.bars) ? opts.bars : [];
   const nameMap =
     opts && opts.nameMap && typeof opts.nameMap === 'object' ? opts.nameMap : {};
+  // F11／Task 15：排除集採 Set 或字串陣列；壞型別 → 空集（零回歸）。
+  const exclude = new Set(normalizeStudyExclude(opts && opts.exclude));
   const out = [];
 
   if (!studiesMap || typeof studiesMap.forEach !== 'function') return out;
 
   studiesMap.forEach((rec, id) => {
+    if (exclude.has(id)) return; // F11：被排除者不進 payload（且不佔預算）
     if (!rec || typeof rec !== 'object') return;
     const series = rec.series instanceof Map ? rec.series : new Map();
     if (series.size === 0) return; // 只收有逐根值的 study

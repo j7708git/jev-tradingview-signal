@@ -15,6 +15,7 @@ import {
   buildState as realBuildState,
   buildStudies as realBuildStudies,
   fitStateToBudget as realFitStateToBudget,
+  normalizeStudyExclude as realNormalizeStudyExclude,
   QUESTIONS as realQuestions,
 } from './state-builder.js';
 import { JevError, evaluate as realEvaluate } from './jev-client.js';
@@ -419,6 +420,8 @@ export function createDb(deps = {}) {
         'featuresOn',
         // Task 13：study 顯示名稱覆寫（主鍵 studyId）；由 SW 讀出注入 buildStudies。
         'studyNameMap',
+        // Task 15／F11：被排除（不進 payload）的 studyId 陣列。
+        'studyExclude',
       ]);
       return got && typeof got === 'object' ? got : {};
     } catch {
@@ -479,9 +482,13 @@ export function createDb(deps = {}) {
         opts.studyNameMap && typeof opts.studyNameMap === 'object'
           ? opts.studyNameMap
           : {};
+      // Task 15／F11：排除集（壞型別／含非字串 → 當 []）；被排除者不進 payload。
+      // 過濾在 buildStudies 內生效，早於下方 fitStateToBudget 的預算裁剪。
+      const exclude = realNormalizeStudyExclude(opts.studyExclude);
       state.studies = buildStudies(entry.studies, {
         bars: state.bars,
         nameMap,
+        exclude,
       });
       // Task 14fix：輸入預算守門（超標時尾端裁窗；未超標逐位元不變）。
       fitStateToBudget(state);

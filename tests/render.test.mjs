@@ -32,7 +32,15 @@ import {
   renderStudiesMeta,
   renderStudiesSummary,
   applyStudyNameEdit,
+  normalizeStudyExclude,
+  applyStudyExcludeAdd,
+  applyStudyExcludeRemove,
   STUDY_INPUT_CLASS,
+  STUDY_REMOVE_CLASS,
+  STUDY_RESTORE_CLASS,
+  STUDIES_EXCLUDED_CLASS,
+  STUDY_REMOVE_LABEL,
+  STUDY_RESTORE_LABEL,
   STUDIES_EMPTY_TEXT,
 } from '../extension/sidepanel/render.js';
 
@@ -711,6 +719,125 @@ test('Task14：app.js 只寫 studyNameMap 一鍵；render.js 維持純函式不�
   assert.match(appSrc, /chrome\.storage\.local\.set\(\{\s*studyNameMap\s*\}\)/);
   assert.match(appSrc, /STUDY_INPUT_CLASS/);
   assert.match(appSrc, /applyStudyNameEdit/);
+
+  const renderSrc = readFileSync(
+    new URL('../extension/sidepanel/render.js', import.meta.url),
+    'utf8',
+  );
+  assert.doesNotMatch(renderSrc, /\bchrome\.(?:runtime|storage|sidePanel|tabs)\b/);
+});
+
+// ─────────────────────────────────────────────────────────────
+// Task 15／F11：指標映射刪除（排除）鈕
+// ─────────────────────────────────────────────────────────────
+
+test('Task15 renderStudiesMeta：每列含「✕」刪除鈕（data-study-id／aria-label／title）', () => {
+  const html = renderStudiesMeta([
+    { id: 'sid1', name: 'ALMA(25)', rawName: 'Arnaud Legoux Moving Average' },
+    { id: 'sid2', name: 'Volume(20)', rawName: 'Volume' },
+  ]);
+  assert.equal((html.match(new RegExp(STUDY_REMOVE_CLASS, 'g')) || []).length, 2);
+  assert.match(html, /data-study-id="sid1"/);
+  assert.match(html, new RegExp(`aria-label="${STUDY_REMOVE_LABEL}"`));
+  assert.match(html, new RegExp(`title="${STUDY_REMOVE_LABEL}"`));
+  assert.match(html, /✕/);
+  // 無排除 → 不渲染已排除區。
+  assert.doesNotMatch(html, new RegExp(STUDIES_EXCLUDED_CLASS));
+});
+
+test('Task15 renderStudiesMeta：被排除者不進主列表；已排除區顯示 N＋復原鈕（自訂名優先）', () => {
+  const html = renderStudiesMeta(
+    [
+      { id: 'a', name: 'A(10)' },
+      { id: 'b', name: 'B(20)' },
+      { id: 'c', name: 'C(30)' },
+    ],
+    { b: '我的B' },
+    ['b', 'c', 'zzz-does-not-exist'],
+  );
+  // 主列表只剩 a（1 輸入框、1 刪除鈕）。
+  assert.equal((html.match(new RegExp(STUDY_INPUT_CLASS, 'g')) || []).length, 1);
+  assert.equal((html.match(new RegExp(STUDY_REMOVE_CLASS, 'g')) || []).length, 1);
+  assert.match(html, /data-study-id="a"/);
+
+  // 已排除區：N=2（不存在於 studiesMeta 的 zzz 不列入）、兩顆復原鈕、自訂名優先。
+  assert.match(html, new RegExp(STUDIES_EXCLUDED_CLASS));
+  assert.match(html, /已排除（2）/);
+  assert.equal((html.match(new RegExp(STUDY_RESTORE_CLASS, 'g')) || []).length, 2);
+  assert.match(html, /我的B/);
+  assert.match(html, /C\(30\)/);
+  assert.match(html, /復原/);
+  assert.doesNotMatch(html, /zzz-does-not-exist/);
+  assert.match(html, new RegExp(`aria-label="${STUDY_RESTORE_LABEL}"`));
+  assert.match(html, new RegExp(`title="${STUDY_RESTORE_LABEL}"`));
+});
+
+test('Task15 renderStudiesMeta 邊界：無指標不渲染刪除鈕／已排除區；全排除→降級文案＋N 筆', () => {
+  // 無指標（含壞輸入）雖有排除集，仍不得渲染刪除鈕或已排除區。
+  for (const empty of [[], null, undefined, 'x']) {
+    const html = renderStudiesMeta(empty, undefined, ['a']);
+    assert.match(html, new RegExp(STUDIES_EMPTY_TEXT));
+    assert.doesNotMatch(html, new RegExp(STUDY_REMOVE_CLASS));
+    assert.doesNotMatch(html, new RegExp(STUDIES_EXCLUDED_CLASS));
+  }
+
+  // 全部排除 → 主列表降級文案不變、已排除區顯示 N 筆。
+  const all = renderStudiesMeta(
+    [
+      { id: 'a', name: 'A' },
+      { id: 'b', name: 'B' },
+    ],
+    undefined,
+    ['a', 'b'],
+  );
+  assert.match(all, new RegExp(STUDIES_EMPTY_TEXT));
+  assert.equal((all.match(new RegExp(STUDY_REMOVE_CLASS, 'g')) || []).length, 0);
+  assert.match(all, /已排除（2）/);
+  assert.equal((all.match(new RegExp(STUDY_RESTORE_CLASS, 'g')) || []).length, 2);
+});
+
+test('Task15 renderStudiesMeta：exclude 壞型別防呆不炸', () => {
+  const list = [{ id: 'a', name: 'A' }];
+  for (const bad of [null, undefined, 'a', 42, { a: true }, ['a', 5]]) {
+    const html = renderStudiesMeta(list, {}, bad);
+    assert.match(html, /data-study-id="a"/);
+    assert.doesNotMatch(html, new RegExp(STUDIES_EXCLUDED_CLASS));
+  }
+});
+
+test('Task15 normalizeStudyExclude／applyStudyExcludeAdd／Remove：去重、壞型別、不改動輸入', () => {
+  assert.deepEqual(normalizeStudyExclude(['a', 'a', 'b', '']), ['a', 'b']);
+  assert.deepEqual(normalizeStudyExclude(new Set(['a', 'a', 'b'])), ['a', 'b']);
+  assert.deepEqual(normalizeStudyExclude(['a', 5]), []);
+  assert.deepEqual(normalizeStudyExclude('a'), []);
+  assert.deepEqual(normalizeStudyExclude(null), []);
+
+  const base = ['a'];
+  assert.deepEqual(applyStudyExcludeAdd(base, 'b'), ['a', 'b']);
+  assert.deepEqual(applyStudyExcludeAdd(base, 'a'), ['a']);
+  assert.deepEqual(applyStudyExcludeAdd(base, ''), ['a']);
+  assert.deepEqual(applyStudyExcludeAdd(['a', 5], 'b'), ['b'], '壞輸入→[] 再加 b');
+  assert.deepEqual(applyStudyExcludeRemove(['a', 'b'], 'a'), ['b']);
+  assert.deepEqual(applyStudyExcludeRemove(['a', 'b'], 'z'), ['a', 'b']);
+  assert.deepEqual(applyStudyExcludeRemove(['a', 5], 'a'), [], '壞輸入→[]');
+  assert.deepEqual(base, ['a'], '原陣列不得被改動');
+});
+
+test('Task15：app.js 綁刪除/復原並只寫 studyExclude 一鍵；studyNameMap／render 純度不變', () => {
+  const appSrc = readFileSync(
+    new URL('../extension/sidepanel/app.js', import.meta.url),
+    'utf8',
+  );
+  assert.match(appSrc, /chrome\.storage\.local\.get\('studyExclude'\)/);
+  assert.match(appSrc, /chrome\.storage\.local\.set\(\{\s*studyExclude\s*\}\)/);
+  assert.match(appSrc, /STUDY_REMOVE_CLASS/);
+  assert.match(appSrc, /STUDY_RESTORE_CLASS/);
+  assert.match(appSrc, /applyStudyExcludeAdd/);
+  assert.match(appSrc, /applyStudyExcludeRemove/);
+  assert.match(appSrc, /onStudyRemoveClick/);
+  assert.match(appSrc, /onStudyRestoreClick/);
+  // 自訂名 writer 未被改動（仍只寫 studyNameMap 一鍵）。
+  assert.match(appSrc, /chrome\.storage\.local\.set\(\{\s*studyNameMap\s*\}\)/);
 
   const renderSrc = readFileSync(
     new URL('../extension/sidepanel/render.js', import.meta.url),

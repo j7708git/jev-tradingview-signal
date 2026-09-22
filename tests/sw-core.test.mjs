@@ -1307,3 +1307,124 @@ test('Task14 GET_STATE studiesMeta：無指標 → []、storage 覆寫不影響�
   ).studiesMeta;
   assert.deepEqual(meta, []);
 });
+
+// ─────────────────────────────────────────────────────────────
+// Task 15／F11：studyExclude（被排除者不進 payload）
+// ─────────────────────────────────────────────────────────────
+
+test('Task15 RUN_PREDICTION：studyExclude 過濾 payload；studiesMeta 仍全量；nameMap 覆寫保留', async () => {
+  const h = makeHarness({
+    store: { studyNameMap: { keep: '自訂保留' }, studyExclude: ['drop'] },
+  });
+  const db = createDb(h.deps);
+  const all = bars(1_000_000, 350);
+  db.handleRuntimeMessage(
+    upsert(all, { symbol: 'BINANCE:BTCUSDT', resolution: '1' }),
+    tvSender(1),
+  );
+  const t = all[349][0];
+  db.handleRuntimeMessage(
+    studiesUpsert(
+      {
+        drop: { scriptName: 'Drop@x', params: { length: 1 } },
+        keep: { scriptName: 'Keep@x', params: { length: 2 } },
+      },
+      { drop: [[t, 1]], keep: [[t, 2]] },
+    ),
+    tvSender(1),
+  );
+
+  const res = await db.handleRuntimeMessage(run(1), panelSender());
+  assert.equal(res.ok, true);
+  const state = h.evaluateCalls[0].state;
+  assert.deepEqual(
+    state.studies.map((s) => s.id),
+    ['keep'],
+    '被排除者不出現在 state.studies',
+  );
+  assert.equal(state.studies[0].name, '自訂保留', 'nameMap 覆寫不受排除影響');
+  assert.equal(state.studies[0].rawName, 'Keep');
+
+  // 被排除但仍在 studiesMeta（UI 需要其名稱渲染已排除區）。
+  const meta = db.handleRuntimeMessage(
+    { v: 1, type: globalThis.MSG.GET_STATE, tabId: 1 },
+    panelSender(),
+  ).studiesMeta;
+  assert.deepEqual(meta.map((s) => s.id).sort(), ['drop', 'keep']);
+});
+
+test('Task15 studyExclude 壞型別→[]：非陣列／含非字串皆不排除任何 study', async () => {
+  for (const bad of ['drop', ['drop', 5], ['drop', null], { drop: true }, null, 42]) {
+    const h = makeHarness({ store: { studyExclude: bad } });
+    const db = createDb(h.deps);
+    const all = bars(1_000_000, 350);
+    db.handleRuntimeMessage(
+      upsert(all, { symbol: 'S', resolution: '1' }),
+      tvSender(1),
+    );
+    db.handleRuntimeMessage(
+      studiesUpsert({ drop: { scriptName: 'D@x' } }, { drop: [[all[349][0], 1]] }),
+      tvSender(1),
+    );
+    await db.handleRuntimeMessage(run(1), panelSender());
+    assert.deepEqual(
+      h.evaluateCalls[0].state.studies.map((s) => s.id),
+      ['drop'],
+      `bad=${String(bad)} 應視為 [] 不排除`,
+    );
+  }
+});
+
+test('Task15 全部排除 → studies:[]（同未掛指標語意），但 studiesMeta 仍全量', async () => {
+  const h = makeHarness({ store: { studyExclude: ['a', 'b'] } });
+  const db = createDb(h.deps);
+  const all = bars(1_000_000, 350);
+  db.handleRuntimeMessage(
+    upsert(all, { symbol: 'S', resolution: '1' }),
+    tvSender(1),
+  );
+  const t = all[349][0];
+  db.handleRuntimeMessage(
+    studiesUpsert(
+      { a: { scriptName: 'A@x' }, b: { scriptName: 'B@x' } },
+      { a: [[t, 1]], b: [[t, 2]] },
+    ),
+    tvSender(1),
+  );
+
+  await db.handleRuntimeMessage(run(1), panelSender());
+  assert.deepEqual(h.evaluateCalls[0].state.studies, []);
+  const meta = db.handleRuntimeMessage(
+    { v: 1, type: globalThis.MSG.GET_STATE, tabId: 1 },
+    panelSender(),
+  ).studiesMeta;
+  assert.equal(meta.length, 2, '全部排除不影響 studiesMeta');
+});
+
+test('Task15 被排除者不吃預算：9 studies 排除 7 → 不觸發 studiesTrimmed', async () => {
+  const h = makeHarness(); // 用真實 fitStateToBudget／INPUT_BUDGET_CHARS
+  const db = createDb(h.deps);
+  const all = bars(1_000_000, 350);
+  db.handleRuntimeMessage(
+    upsert(all, { symbol: 'S', resolution: '1' }),
+    tvSender(1),
+  );
+  const windowTimes = all.slice(50).map((b) => b[0]);
+  const meta = {};
+  const patches = {};
+  for (let i = 0; i < 9; i += 1) {
+    meta[`sid${i}`] = { scriptName: `Study${i}@x`, params: { length: 10 + i } };
+    patches[`sid${i}`] = windowTimes.map((t, idx) => [t, 100 + i + idx * 0.5]);
+  }
+  db.handleRuntimeMessage(studiesUpsert(meta, patches), tvSender(1));
+  h.store.studyExclude = ['sid0', 'sid1', 'sid2', 'sid3', 'sid4', 'sid5', 'sid6'];
+
+  const res = await db.handleRuntimeMessage(run(1), panelSender());
+  assert.equal(res.ok, true);
+  const state = h.evaluateCalls[0].state;
+  assert.equal(state.studies.length, 2);
+  assert.equal('studiesTrimmed' in state, false, '排除後未超標，不得裁剪');
+  for (const s of state.studies) {
+    assert.equal(s.values.length, 300, `study ${s.id} 應保留完整 300 窗`);
+  }
+});
