@@ -148,10 +148,14 @@
   - **真機 e2e 最終結果（`scripts/e2e-real-chrome.mjs`，8/8 PASS；2026-09-22 09g/09h 後）**：擴充載入無錯誤；金鑰寫入 `chrome.storage.local`；真 TradingView 圖表載入；Side Panel 狀態列 `圖表：BINANCE:BTCUSDT · 15 · 300 根 · buffer total 300`（含反污染斷言）；預測鈕由 disabled→啟用；`RUN_PREDICTION` **ok:true／1009ms（真 TypeSafe API）**；面板渲染 `做多 36% / 做多 57% / 觀望 31% / 做空 12%｜未來 10 根上漲機率 53%｜多頭趨勢強度 2.59｜空頭趨勢強度 0.78｜17551 tokens · $0.0007 · jev-latest`。
     - ⚠️ 更早一筆「7/7 PASS／666 根／趨勢強度 2.99」為**污染狀態**下的觀測（666 = 主圖 300＋輔助序列 366，且趨勢強度為舊單題版），已作廢，見 Task 09f 更正紀錄。
   - **站內切換標的複驗（09g 後）**：`{count:300, symbol:BINANCE:BTCUSDT}` → 站內切換 → `{count:300, symbol:BINANCE:ETHUSDT}`（無混幣、符號即時更新）。
-  - **清單狀態**：①②③④⑥⑦已驗（③=不同分頁各自準確、⑥=實測 $0.0007/次 ≈ NT$0.02、⑦=`git grep` 無明文長 token 且未追蹤 `.env`）；⑤（錯 key／斷網的中文提示）僅經單元測試覆蓋，未在真機手動觸發。
+  - **清單狀態**：①②③④⑥⑦已驗（③=不同分頁各自準確、⑥=實測 $0.0007/次 ≈ NT$0.02、⑦=`git grep` 無明文長 token 且未追蹤 `.env`）；⑤已於 2026-09-22 真機補驗完成（見下方⑤補驗紀錄）。
   - **使用者手動實測（2026-09-22）**：回報「做得不錯」= 通過。使用者實測中另抓出兩個問題（站內換商品符號不更新＝真缺陷已修 09g；趨勢強度拆分＝需求變更已做 09h）。
   - **切換標的複驗**：整頁重載切 ETHUSDT/5 → state `{count:300, symbol:BINANCE:ETHUSDT, resolution:"5"}`（乾淨，無混幣）。
-  - 待辦（2026-09-22 收尾後）：清單⑤（錯 key／斷網的中文提示）尚未真機手動觸發（單元測試已覆蓋）。其餘 ①②③④⑥⑦ 已驗。
+  - **清單⑤ 真機補驗（2026-09-22，架構師以 `scripts/e2e-error-paths.mjs` 執行，17/17 PASS）**：
+    - 錯 key：寫入偽金鑰 → `RUN_PREDICTION` 799ms 回 `{ok:false, error:'auth_401'}` → Panel DOM「預測失敗｜auth_401｜API key 已被拒絕（401）」＋免責固定語；回應序列化與 DOM 皆不含金鑰字串（redact 實測）。
+    - 斷網：CDP attach SW target 雙重阻斷（`Network.emulateNetworkConditions{offline}`＋`Fetch.failRequest`）→ 真 fetch 產生 TypeError 走完整正規化路徑 → 回 `offline` → Panel DOM「離線或防火牆擋了 api.typesafe.ai」＋免責語。（註：屬模擬斷網，非拔實體網路。）
+    - 復原：換回真金鑰 → `ok:true`（1446ms、17557 tokens、$0.0007），DOM 回正常結果渲染——錯誤狀態未卡死面板。
+  - 清單七項 ①–⑦ 至此**全數真機驗證完畢**，Task 09 無殘留待辦。
 
 ### [ ] Task 10:（選做，可取捨）除錯增強
 - droppedFrames／各 series 計數進 debug 面板；ring log 最近 20 次預測；「重同步」按鈕（觸發 REQ_SNAPSHOT）。
