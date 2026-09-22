@@ -9,6 +9,8 @@ import {
   buildState,
   buildStudies,
   estimateTokens,
+  fitStateToBudget,
+  INPUT_BUDGET_CHARS,
 } from '../extension/lib/state-builder.js';
 import '../extension/lib/protocol.js';
 // protocol.js 為 classic-script 雙相容（無 ESM export）；符號掛在 globalThis。
@@ -309,4 +311,143 @@ test('buildStudies: 同窗口缺值根補 null（與 state.bars 窗口逐位對�
   assert.equal(out[0].values.length, 50);
   assert.deepEqual(out[0].values[49], [times[49], 7]);
   for (let i = 0; i < 49; i += 1) assert.equal(out[0].values[i], null);
+});
+
+// ─────────────────────────────────────────────────────────────
+// Task 14fix：fitStateToBudget 輸入預算守門
+// ─────────────────────────────────────────────────────────────
+
+/** 完整 systemone 請求字元長度（與 state-builder 內部量測同構）。 */
+function payloadLen(state) {
+  return JSON.stringify({ model: 'jev-latest', state, questions: QUESTIONS }).length;
+}
+
+/** n 個全窗（300 根）study 的 Map，每根帶一個值。 */
+function fullStudiesMap(n) {
+  const map = new Map();
+  for (let i = 0; i < n; i += 1) {
+    const entries = BARS.map((b, idx) => [b[0], [100 + i + idx * 0.5]]);
+    map.set(
+      `sid${i}`,
+      studyRec(
+        { scriptName: `Study${i}@tv-scripting-101!`, params: { length: 10 + i } },
+        entries,
+      ),
+    );
+  }
+  return map;
+}
+
+function withStudies(state, nStudies, nameMap) {
+  state.studies = buildStudies(fullStudiesMap(nStudies), {
+    bars: state.bars,
+    nameMap,
+  });
+  return state;
+}
+
+test('fitStateToBudget: 未超標 → 同一物件、JSON 逐位元不變、無 studiesTrimmed', () => {
+  const state = withStudies(
+    buildState(snapshot(), { bars: 50, features: true, now: NOW }),
+    1,
+    { sid0: '自訂' },
+  );
+  assert.ok(payloadLen(state) <= INPUT_BUDGET_CHARS, '前置：必須未超標');
+  const before = JSON.stringify(state);
+  const out = fitStateToBudget(state);
+  assert.equal(out, state, '未超標須回傳同一 state 物件');
+  assert.equal(JSON.stringify(out), before, '逐位元不變');
+  assert.equal('studiesTrimmed' in out, false);
+});
+
+test('fitStateToBudget: 9 studies×300 → 尾端裁窗、整包 ≤ 預算、尾列最新、names/params 保留', () => {
+  const state = withStudies(
+    buildState(snapshot(), { bars: 300, features: false, now: NOW }),
+    9,
+    { sid0: '自訂0' },
+  );
+  assert.ok(payloadLen(state) > INPUT_BUDGET_CHARS, '前置：必須超標');
+  const beforeLast = state.studies.map((s) => s.values[s.values.length - 1]);
+
+  const out = fitStateToBudget(state);
+  assert.equal(out, state);
+  assert.ok(payloadLen(out) <= INPUT_BUDGET_CHARS, '裁後整包須 ≤ 預算');
+  assert.ok(Number.isInteger(out.studiesTrimmed));
+  const k = out.studiesTrimmed;
+  assert.ok(k >= 0 && k < 300, `K 須落在 [0,300)，得到 ${k}`);
+  for (const s of out.studies) assert.equal(s.values.length, k, '每 study 相同 K');
+  // 尾列為最新列（time 自帶、對齊語意不變）。
+  out.studies.forEach((s, i) => {
+    assert.deepEqual(s.values[s.values.length - 1], beforeLast[i]);
+  });
+  // 身分欄位不受裁剪影響。
+  assert.equal(out.studies[0].name, '自訂0');
+  assert.deepEqual(out.studies[0].params, { length: 10 });
+  assert.equal(out.studies[0].rawName, 'Study0');
+  assert.deepEqual(out.studies[0].columns, ['time', 'v1']);
+
+  // 確定性：同輸入同輸出（重建後再跑一次）。
+  const state2 = withStudies(
+    buildState(snapshot(), { bars: 300, features: false, now: NOW }),
+    9,
+    { sid0: '自訂0' },
+  );
+  assert.equal(fitStateToBudget(state2).studiesTrimmed, k);
+});
+
+test('fitStateToBudget: K=0 降級 → values: [] 但 id/name/params/columns 保留', () => {
+  const state = withStudies(
+    buildState(snapshot(), { bars: 300, features: false, now: NOW }),
+    3,
+    { sid1: '自訂1' },
+  );
+  const clearLen = payloadLen({
+    ...state,
+    studies: state.studies.map((s) => ({ ...s, values: [] })),
+    studiesTrimmed: 0,
+  });
+  const oneLen = payloadLen({
+    ...state,
+    studies: state.studies.map((s) => ({ ...s, values: s.values.slice(-1) })),
+    studiesTrimmed: 1,
+  });
+  const budget = oneLen - 1; // 清空可行、留 1 列不可行
+  assert.ok(clearLen <= budget, `clearLen=${clearLen} 應 ≤ budget=${budget}`);
+  assert.ok(oneLen > budget, `oneLen=${oneLen} 應 > budget=${budget}`);
+
+  const out = fitStateToBudget(state, { budgetChars: budget });
+  assert.equal(out.studiesTrimmed, 0);
+  for (const s of out.studies) {
+    assert.deepEqual(s.values, []);
+    assert.equal(typeof s.id, 'string');
+    assert.equal(typeof s.rawName, 'string');
+    assert.deepEqual(s.columns, ['time', 'v1']);
+  }
+  assert.equal(out.studies[1].name, '自訂1');
+  assert.deepEqual(out.studies[0].params, { length: 10 });
+});
+
+test('fitStateToBudget: bars+questions 本身即超預算 → 原樣回傳、不動 bars', () => {
+  const state = withStudies(
+    buildState(snapshot(), { bars: 300, features: false, now: NOW }),
+    1,
+  );
+  const before = JSON.stringify(state);
+  const out = fitStateToBudget(state, { budgetChars: 100 });
+  assert.equal(out, state);
+  assert.equal(JSON.stringify(out), before);
+  assert.equal('studiesTrimmed' in out, false);
+  assert.deepEqual(out.bars, state.bars);
+  assert.equal(out.studies[0].values.length, 300, 'studies 亦不動');
+});
+
+test('fitStateToBudget: 無 studies 可裁時原樣回傳；budgetChars 可注入', () => {
+  const state = buildState(snapshot(), { bars: 300, features: false, now: NOW });
+  const before = JSON.stringify(state);
+  assert.equal(fitStateToBudget(state), state);
+  assert.equal(JSON.stringify(state), before);
+
+  // 注入極小預算：仍不能憑空縮 bars → 原樣。
+  const withEmpty = { ...state, studies: [] };
+  assert.equal(fitStateToBudget(withEmpty, { budgetChars: 10 }), withEmpty);
 });

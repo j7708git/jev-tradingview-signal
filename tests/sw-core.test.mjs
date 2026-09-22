@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 
 import { createDb } from '../extension/lib/sw-core.js';
 import { ChartBuffer } from '../extension/lib/chart-buffer.js';
-import { buildState, QUESTIONS, estimateTokens } from '../extension/lib/state-builder.js';
+import { buildState, QUESTIONS, estimateTokens, fitStateToBudget as realFitStateToBudget, INPUT_BUDGET_CHARS } from '../extension/lib/state-builder.js';
 import { JevError } from '../extension/lib/jev-client.js';
 
 const KEY = 'SECRET-KEY-777';
@@ -73,6 +73,7 @@ function makeHarness(overrides = {}) {
     },
     ChartBuffer,
     buildState,
+    fitStateToBudget: overrides.fitStateToBudget || realFitStateToBudget,
     QUESTIONS,
     estimateTokens,
     waitMs: overrides.waitMs != null ? overrides.waitMs : 5,
@@ -270,6 +271,82 @@ test('evaluate 拋 JevError → last error/auth_401、broadcast error、序列�
 
   const updates = h.broadcasts.filter((m) => m.type === 'PREDICTION_UPDATED');
   assert.deepEqual(updates.map((m) => m.state), ['loading', 'error']);
+});
+
+test('Task14fix：error 路徑 entry.last 帶 bodySnippet（已 redact、無 key、可帶 detail）', async () => {
+  const h = makeHarness({
+    evaluate: async () => {
+      throw new JevError('bad_request_422', `bad request ${KEY}`, {
+        status: 422,
+        bodySnippet: `{"detail":{"error_type":"max_tokens_exceeded","leak":"${KEY}"}}`,
+      });
+    },
+  });
+  const db = createDb(h.deps);
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'S', resolution: '1' }),
+    tvSender(1),
+  );
+  const res = await db.handleRuntimeMessage(run(1), panelSender());
+  assert.equal(res.ok, false);
+  assert.equal(res.error, 'bad_request_422');
+
+  const last = db.entryFor(1).last;
+  assert.equal(last.status, 'error');
+  assert.equal(last.kind, 'bad_request_422');
+  assert.equal(typeof last.bodySnippet, 'string');
+  assert.ok(last.bodySnippet.includes('max_tokens_exceeded'));
+  assert.equal(last.bodySnippet.includes(KEY), false, 'bodySnippet 不得含 key');
+  assert.ok(last.bodySnippet.includes('[redacted]'));
+  assert.equal(JSON.stringify(last).includes(KEY), false);
+});
+
+test('Task14fix：JevError 無 bodySnippet → entry.last 不憑空新增欄位', async () => {
+  const h = makeHarness({
+    evaluate: async () => {
+      throw new JevError('auth_401', 'nope');
+    },
+  });
+  const db = createDb(h.deps);
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'S', resolution: '1' }),
+    tvSender(1),
+  );
+  await db.handleRuntimeMessage(run(1), panelSender());
+  assert.equal('bodySnippet' in db.entryFor(1).last, false);
+});
+
+test('Task14fix sw-core 接線：over-budget 時 evaluate 收到裁後 state 且 studiesTrimmed 存在', async () => {
+  const h = makeHarness();
+  const db = createDb(h.deps);
+  const all = bars(1_000_000, 320);
+  db.handleRuntimeMessage(
+    upsert(all, { symbol: 'BINANCE:BTCUSDT', resolution: '1' }),
+    tvSender(1),
+  );
+
+  // 9 個全窗（300 根）study → 整包遠超 INPUT_BUDGET_CHARS。
+  const times = all.map((b) => b[0]);
+  const meta = {};
+  const patches = {};
+  for (let i = 0; i < 9; i += 1) {
+    const id = `s${i}`;
+    meta[id] = { scriptName: `Study${i}@x`, params: { length: 10 + i } };
+    patches[id] = times.map((t, idx) => [t, 100 + i + idx * 0.5]);
+  }
+  db.handleRuntimeMessage(studiesUpsert(meta, patches), tvSender(1));
+
+  const res = await db.handleRuntimeMessage(run(1), panelSender());
+  assert.equal(res.ok, true);
+  const state = h.evaluateCalls[0].state;
+  assert.equal(state.studies.length, 9);
+  assert.ok(Number.isInteger(state.studiesTrimmed), 'studiesTrimmed 必須存在且為整數');
+  assert.ok(state.studiesTrimmed >= 0 && state.studiesTrimmed < state.barsWindow);
+  for (const s of state.studies) {
+    assert.equal(s.values.length, state.studiesTrimmed, '每 study 相同 K');
+  }
+  const len = JSON.stringify({ model: 'jev-latest', state, questions: QUESTIONS }).length;
+  assert.ok(len <= INPUT_BUDGET_CHARS, `裁後整包 ${len} 應 ≤ ${INPUT_BUDGET_CHARS}`);
 });
 
 test('非 JevError 的一般 throw → status error / kind error，流程不崩', async () => {

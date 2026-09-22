@@ -14,6 +14,7 @@ import { ChartBuffer as RealChartBuffer } from './chart-buffer.js';
 import {
   buildState as realBuildState,
   buildStudies as realBuildStudies,
+  fitStateToBudget as realFitStateToBudget,
   QUESTIONS as realQuestions,
 } from './state-builder.js';
 import { JevError, evaluate as realEvaluate } from './jev-client.js';
@@ -111,6 +112,7 @@ function parseResolution(url) {
  * @param {Function} [deps.ChartBuffer]               lib/chart-buffer 的類別（可注入）
  * @param {Function} [deps.buildState]                lib/state-builder 的 buildState
  * @param {object}   [deps.QUESTIONS]                 lib/state-builder 的 QUESTIONS
+ * @param {Function} [deps.fitStateToBudget]          lib/state-builder 的 fitStateToBudget（Task 14fix）
  * @param {Function} [deps.estimateTokens]            保留（純 lib，任務未用到）
  * @param {number}   [deps.waitMs=800]                等 REQ_SNAPSHOT 補傳的上限
  * @returns {{handleRuntimeMessage:Function,onTabClosed:Function,entryFor:Function,pendingForTest:Function}}
@@ -124,6 +126,7 @@ export function createDb(deps = {}) {
   const ChartBuffer = deps.ChartBuffer || RealChartBuffer;
   const buildState = deps.buildState || realBuildState;
   const buildStudies = deps.buildStudies || realBuildStudies;
+  const fitStateToBudget = deps.fitStateToBudget || realFitStateToBudget;
   const QUESTIONS = deps.QUESTIONS || realQuestions;
   const waitMs = Number.isFinite(deps.waitMs) ? deps.waitMs : DEFAULT_WAIT_MS;
 
@@ -480,6 +483,8 @@ export function createDb(deps = {}) {
         bars: state.bars,
         nameMap,
       });
+      // Task 14fix：輸入預算守門（超標時尾端裁窗；未超標逐位元不變）。
+      fitStateToBudget(state);
 
       const res = await evaluate({
         apiKey,
@@ -511,7 +516,20 @@ export function createDb(deps = {}) {
       let message = err && err.message != null ? String(err.message) : String(err);
       // client 已 redact；這裡再防呆一次，key 只在此變數短暫存在。
       if (apiKey) message = message.split(apiKey).join(REDACTED);
-      entry.last = { status: 'error', kind, message };
+      const lastError = { status: 'error', kind, message };
+      // Task 14fix：帶出 client 的 bodySnippet（已 redact＋截 200 字）供日後診斷；
+      // 這裡再以 apiKey 防呆剝除一次（值不存在時等價不變）。
+      if (
+        err &&
+        typeof err === 'object' &&
+        typeof err.bodySnippet === 'string' &&
+        err.bodySnippet.length > 0
+      ) {
+        lastError.bodySnippet = apiKey
+          ? err.bodySnippet.split(apiKey).join(REDACTED)
+          : err.bodySnippet;
+      }
+      entry.last = lastError;
       entry.status = 'error';
       broadcast(MSG.PREDICTION_UPDATED, { tabId, state: 'error', status: 'error' });
       return { ok: false, error: kind, result: entry.last };

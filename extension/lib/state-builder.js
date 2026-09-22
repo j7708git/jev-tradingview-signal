@@ -256,3 +256,90 @@ export function buildStudies(studiesMap, opts = {}) {
 export function estimateTokens(state) {
   return Math.ceil(JSON.stringify(state).length / 4);
 }
+
+// ─────────────────────────────────────────────────────────────
+// Task 14fix：輸入預算守門（§4.4 systemone 請求大小上限）
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * systemone 輸入預算（JSON 字元數）。API 對輸入設上限，超過回 400/422，
+ * body 為 `{"detail":{"error_type":"max_tokens_exceeded"}}`。
+ *
+ * 架構師實測（2026-09-22；9 指標 × 300 窗）：
+ *   - pass＝29,669 input_tokens ／ 37.2KB payload
+ *   - fail≈33K input_tokens ／ 40.9KB payload（上限約 32K tokens）
+ * 實測 token/byte ≈ 0.8；為保守計以「JSON 字元數」為守門量並取 29000
+ * （約 23K tokens），在 32K 上限前留安全邊際。
+ */
+export const INPUT_BUDGET_CHARS = 29000;
+
+/**
+ * 完整 systemone 請求的實際字元長度（與 jev-client 送出的 body 同構）。
+ * @param {object} state
+ * @returns {number}
+ */
+function payloadChars(state) {
+  return JSON.stringify({ model: 'jev-latest', state, questions: QUESTIONS }).length;
+}
+
+/**
+ * 以「尾端裁窗」把 systemone `state` 壓進輸入預算。
+ *
+ * - 未超標（整包 ≤ 預算）→ 原樣回傳同一 state 物件（零改動、逐位元不變）。
+ * - 超標 → 對每個 `state.studies[*].values` 取「相同 K」的尾端 `slice(-K)`
+ *   （0 ≤ K ≤ `state.barsWindow`；rows 自帶 time，對齊語意不變），
+ *   以確定性二分搜尋最大可行 K，並附 `state.studiesTrimmed = K`。
+ * - K=0（清空 values；id/name/rawName/params/columns 保留）仍超標
+ *   → 代表 bars＋questions 本身就超預算：原樣回傳、不動 bars，交 API 錯誤路徑回報。
+ *
+ * @param {object} state §4.4 state（`studies` 為陣列時才可能被裁）
+ * @param {{budgetChars?: number}} [opts] `budgetChars` 可注入（測試用）
+ * @returns {object} 同一個（未超標／無法裁）或裁後 state
+ */
+export function fitStateToBudget(state, opts = {}) {
+  if (!state || typeof state !== 'object') return state;
+  const budget =
+    Number.isFinite(opts.budgetChars) && opts.budgetChars >= 0
+      ? opts.budgetChars
+      : INPUT_BUDGET_CHARS;
+
+  if (payloadChars(state) <= budget) return state;
+
+  const studies = state.studies;
+  // 無 studies 可裁（或全空）→ 無法降長度，原樣回傳交錯誤路徑。
+  if (!Array.isArray(studies) || studies.length === 0) return state;
+
+  // 以不變動原 state 的視圖量長度（保留鍵順序，且計入最終會附加的
+  // `studiesTrimmed` 欄位，確保裁後整包含標記仍 ≤ 預算）。
+  const trimmedView = (k) => {
+    const nextStudies = studies.map((s) => {
+      if (!s || typeof s !== 'object') return s;
+      const values = Array.isArray(s.values) ? s.values : [];
+      return { ...s, values: k > 0 ? values.slice(-k) : [] };
+    });
+    return { ...state, studies: nextStudies, studiesTrimmed: k };
+  };
+
+  // K=0 清空仍超標 → bars＋questions 本身即超：原樣回傳、不動 bars。
+  if (payloadChars(trimmedView(0)) > budget) return state;
+
+  const hi =
+    Number.isInteger(state.barsWindow) && state.barsWindow > 0
+      ? state.barsWindow
+      : 0;
+  let lo = 0;
+  let high = hi;
+  while (lo < high) {
+    const mid = Math.ceil((lo + high) / 2);
+    if (payloadChars(trimmedView(mid)) <= budget) lo = mid;
+    else high = mid - 1;
+  }
+  const k = lo;
+
+  for (const s of studies) {
+    if (!s || typeof s !== 'object' || !Array.isArray(s.values)) continue;
+    s.values = k > 0 ? s.values.slice(-k) : [];
+  }
+  state.studiesTrimmed = k;
+  return state;
+}

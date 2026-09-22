@@ -61,6 +61,10 @@ export const ERROR_MESSAGES = {
   insufficient_data: `K 棒不足（需 ≥${PREDICT_MIN_BARS} 根）`,
 };
 
+/** Task 14fix：bad_request_422 的輸入超限提示（僅此 kind 於 renderError 追加第二行）。 */
+export const MAX_TOKENS_HINT =
+  '輸入超過模型上限（max_tokens_exceeded）時，請減少掛載指標或縮小 bars 設定';
+
 /** HTML escape（JSON / 符號等不可信任字串一律先過）。 */
 export function escapeHtml(value) {
   return String(value == null ? '' : value)
@@ -394,11 +398,17 @@ export function renderError(kind, message) {
   const safeKind = kind == null ? 'error' : String(kind);
   // F8：僅 no_key 錯誤態提供設定入口 CTA；其餘 kind 不得出現。
   const cta = safeKind === 'no_key' ? renderOpenOptionsButton('去設定 API key') : '';
+  // Task 14fix：僅 bad_request_422 追加超限提示第二行（errorMsg 對照表不變）。
+  const hint =
+    safeKind === 'bad_request_422'
+      ? `<div class="error-hint">${escapeHtml(MAX_TOKENS_HINT)}</div>`
+      : '';
   return (
     `<div class="error-box">` +
     `<div class="error-title">預測失敗</div>` +
     `<div class="error-kicker">${escapeHtml(safeKind)}</div>` +
     `<div class="error-msg">${escapeHtml(errorMsg(kind, message))}</div>` +
+    hint +
     cta +
     `<p class="disclaimer">${DISCLAIMER}</p></div>`
   );
