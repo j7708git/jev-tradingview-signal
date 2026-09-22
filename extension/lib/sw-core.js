@@ -7,7 +7,8 @@
 
 import './protocol.js';
 // protocol.js 為 classic-script 雙相容（無 export），符號掛在 globalThis。
-const { MSG, makeMessage, BAR_COLUMNS, PREDICT_MIN_BARS } = globalThis;
+const { MSG, makeMessage, BAR_COLUMNS, PREDICT_MIN_BARS, COST_USD_PER_MTOK } =
+  globalThis;
 
 import { ChartBuffer as RealChartBuffer } from './chart-buffer.js';
 import {
@@ -28,13 +29,32 @@ const REDACTED = '[redacted]';
 // 僅接受 tradingview.com/chart（含子網域），邊界錨點避免 evil.com 誤判。
 const TV_CHART_RE = /^https:\/\/([a-z0-9-]+\.)*tradingview\.com\/chart(\/|$)/i;
 
-// panel 專用的 extension-internal 指令（未列入 §4.1 對外協定表）。
-const GET_STATE = 'GET_STATE';
-const SET_ACTIVE_TAB = 'SET_ACTIVE_TAB';
-const ACTIVE_TAB_QUERY = 'ACTIVE_TAB_QUERY';
-const TEST_KEY = 'TEST_KEY';
-const GET_LAST_TAB = 'GET_LAST_TAB';
+// §4.8.2：ring log 只在記憶體，上限 20（超出丟最舊），禁止任何持久化。
+const RING_LOG_MAX = 20;
+// 錯誤筆短 message 上限（redact 後才截短）。
+const RING_MESSAGE_MAX = 120;
+
 const SESSION_LAST_TAB_KEY = 'lastActiveTabId'; // 儲存區 session 的鍵名
+
+/** §4.8.1：inject 尚未回報前的旁聽計數預設值。 */
+function defaultCounters() {
+  return { dropped: 0, ignoredSeriesFrames: 0 };
+}
+
+/**
+ * §4.8.2：ring log 錯誤筆用的短 message 再 redact。
+ * 即使上層已 redact 過，這裡仍防呆剝除 key／Bearer／長 token 並截短。
+ */
+function redactShort(value, apiKey) {
+  let s = value == null ? '' : String(value);
+  if (typeof apiKey === 'string' && apiKey.length > 0) {
+    s = s.split(apiKey).join(REDACTED);
+  }
+  s = s.replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, REDACTED);
+  s = s.replace(/[A-Za-z0-9._\-]{20,}/g, REDACTED);
+  if (s.length > RING_MESSAGE_MAX) s = s.slice(0, RING_MESSAGE_MAX) + '…';
+  return s;
+}
 
 // TEST_KEY 專用：極小固定 state（3 根範例 bar＋features:null）與最簡 direction 單題。
 // 刻意寫死、不走 state-builder（Options 的連線測試不需要真實圖表資料）。
@@ -103,8 +123,10 @@ export function createDb(deps = {}) {
   const QUESTIONS = deps.QUESTIONS || realQuestions;
   const waitMs = Number.isFinite(deps.waitMs) ? deps.waitMs : DEFAULT_WAIT_MS;
 
-  /** tabId → {buffer, meta, status, last, predicting, pending} */
+  /** tabId → {buffer, meta, status, last, predicting, pending, counters} */
   const registry = new Map();
+  /** §4.8.2：最近 RING_LOG_MAX 次 doPredict 摘要（舊→新存；查詢時反轉為新→舊）。 */
+  const ringLog = [];
   let activeTabId = null;
   let activeLoaded = false;
   let activeLoadPromise = null;
@@ -162,6 +184,7 @@ export function createDb(deps = {}) {
         last: null,
         predicting: false,
         pending: null,
+        counters: defaultCounters(),
       };
       registry.set(tabId, entry);
     }
@@ -199,8 +222,70 @@ export function createDb(deps = {}) {
       if (msg.meta.symbol !== undefined) entry.meta.symbol = msg.meta.symbol;
       if (msg.meta.resolution !== undefined) entry.meta.resolution = msg.meta.resolution;
     }
+    // §4.8.1：inject 隨每則 upsert 捎帶的旁聽計數；缺值／非數值一律視為 0。
+    if (msg.counters && typeof msg.counters === 'object') {
+      const droppedN = Number(msg.counters.dropped);
+      const ignoredN = Number(msg.counters.ignoredSeriesFrames);
+      entry.counters = {
+        dropped: Number.isFinite(droppedN) ? droppedN : 0,
+        ignoredSeriesFrames: Number.isFinite(ignoredN) ? ignoredN : 0,
+      };
+    }
     if (entry.pending) entry.pending.finish();
     return false;
+  }
+
+  /** §4.8.2：把一次 doPredict 的結果摘要成 ring log 一筆並推入（超出上限丟最舊）。 */
+  function pushRingLog(tabId, entry, t0, model, apiKey) {
+    const last = entry.last;
+    if (!last) return;
+    const now = Date.now();
+    const meta = entry.meta || {};
+    const base = {
+      at: now,
+      tabId,
+      symbol: meta.symbol !== undefined ? meta.symbol : null,
+      resolution: meta.resolution !== undefined ? meta.resolution : null,
+      ms: Number.isFinite(Number(last.ms)) ? Number(last.ms) : now - t0,
+      model: last.model || model,
+    };
+    let rec;
+    if (last.status === 'done') {
+      const answers = last.answers || {};
+      const direction = answers.direction || {};
+      const up = answers.up_10_bars || {};
+      const bull = answers.bull_trend || {};
+      const bear = answers.bear_trend || {};
+      const usage = last.usage || {};
+      const inputRaw = Number(usage.input_tokens);
+      const outputRaw = Number(usage.output_tokens);
+      const inputTokens = Number.isFinite(inputRaw) ? inputRaw : 0;
+      const outputTokens = Number.isFinite(outputRaw) ? outputRaw : 0;
+      rec = {
+        ...base,
+        ok: true,
+        direction: direction.choice,
+        probs: direction.probabilities,
+        up10: up.noul,
+        bull: bull.score,
+        bear: bear.score,
+        inputTokens,
+        outputTokens,
+        costUsd: (inputTokens * COST_USD_PER_MTOK) / 1e6,
+      };
+    } else {
+      rec = {
+        ...base,
+        ok: false,
+        kind: last.kind || 'error',
+        message: redactShort(last.message, apiKey),
+        inputTokens: 0,
+        outputTokens: 0,
+        costUsd: 0,
+      };
+    }
+    ringLog.push(rec);
+    if (ringLog.length > RING_LOG_MAX) ringLog.shift();
   }
 
   // ── 等待補傳（REQ_SNAPSHOT → 下一次 upsert 或 waitMs 逾時）──────
@@ -259,6 +344,7 @@ export function createDb(deps = {}) {
     broadcast(MSG.PREDICTION_UPDATED, { tabId, state: 'loading', status: 'loading' });
     const t0 = Date.now();
     let apiKey = '';
+    let model = DEFAULT_MODEL;
     try {
       if (entry.buffer.count < RESYNC_MIN_BARS) {
         // §4.7.2(b)：根數不足 → 要求全量重送（沿用 waitMs，逾時不致命）。
@@ -276,6 +362,7 @@ export function createDb(deps = {}) {
       }
       const opts = await readOptions();
       apiKey = typeof opts.jevApiKey === 'string' ? opts.jevApiKey : '';
+      model = opts.jevModel || DEFAULT_MODEL;
 
       const barsN = normalizeBars(opts.bars);
       const snap = entry.buffer.snapshot(barsN);
@@ -288,17 +375,19 @@ export function createDb(deps = {}) {
 
       const res = await evaluate({
         apiKey,
-        model: opts.jevModel || DEFAULT_MODEL,
+        model,
         state,
         questions: QUESTIONS,
       });
       const usage = (res && res.usage) || {};
-      const cost = (usage.input_tokens || 0) * 0.042 / 1e6;
+      // §4.8.2：成本單價單一來源（lib/protocol.js 的 COST_USD_PER_MTOK）。
+      const cost = ((usage.input_tokens || 0) * COST_USD_PER_MTOK) / 1e6;
       entry.last = {
         status: 'done',
         answers: res && res.answers,
         usage,
         cost,
+        model: (res && res.model) || model,
         state,
         ms: Date.now() - t0,
         at: Date.now(),
@@ -319,6 +408,8 @@ export function createDb(deps = {}) {
       broadcast(MSG.PREDICTION_UPDATED, { tabId, state: 'error', status: 'error' });
       return { ok: false, error: kind, result: entry.last };
     } finally {
+      // §4.8.2：每次 doPredict 結束（含錯誤）都留下一筆記憶體摘要。
+      pushRingLog(tabId, entry, t0, model, apiKey);
       entry.predicting = false;
     }
   }
@@ -353,9 +444,11 @@ export function createDb(deps = {}) {
   }
 
   function getState(tabId) {
-    if (tabId === undefined || tabId === null) return { status: 'idle', count: 0 };
+    if (tabId === undefined || tabId === null) {
+      return { status: 'idle', count: 0, counters: defaultCounters() };
+    }
     const entry = registry.get(tabId);
-    if (!entry) return { status: 'idle', count: 0 };
+    if (!entry) return { status: 'idle', count: 0, counters: defaultCounters() };
     // 09e-3：SW 重啟後常見「首則訊息只有尾根」；若根數不足則主動要求全量重送
     // （不阻塞回應；面板下一輪輪詢即恢復）。預測進行中不動用 pending 以免干擾。
     if (!entry.predicting && entry.buffer.count < PREDICT_MIN_BARS) {
@@ -366,9 +459,37 @@ export function createDb(deps = {}) {
       count: entry.buffer.count,
       symbol: entry.meta.symbol !== undefined ? entry.meta.symbol : null,
       resolution: entry.meta.resolution !== undefined ? entry.meta.resolution : null,
+      // §4.8.1：GET_STATE 新增 counters（其餘欄位與語意不變）。
+      counters: entry.counters ? { ...entry.counters } : defaultCounters(),
       last: entry.last,
       meta: entry.meta,
     };
+  }
+
+  /** §4.8.2：GET_RING_LOG → 新→舊的記憶體摘要（永不持久化）。 */
+  function getRingLog() {
+    return { ok: true, entries: ringLog.slice().reverse() };
+  }
+
+  /**
+   * §4.8.3：RESYNC → 對該 tab 發 REQ_SNAPSHOT{full:true}（§4.7.2 語意），
+   * 等補傳（沿用 waitMs，逾時不致命）後回該 tab buffer 根數。
+   * 無 entry／非 TV tab → {ok:false}。
+   */
+  async function resync(tabId) {
+    if (tabId === undefined || tabId === null) return { ok: false };
+    const entry = registry.get(tabId);
+    if (!entry) return { ok: false };
+    let url;
+    try {
+      const tab = await tabs.get(tabId);
+      url = tab && tab.url;
+    } catch {
+      return { ok: false };
+    }
+    if (typeof url !== 'string' || !TV_CHART_RE.test(url)) return { ok: false };
+    await awaitSnapshot(tabId, entry, { full: true });
+    return { ok: true, count: entry.buffer.count };
   }
 
   function setActiveTab(tabId) {
@@ -390,20 +511,24 @@ export function createDb(deps = {}) {
       switch (msg.type) {
         case MSG.RUN_PREDICTION:
           return runPrediction(tabId);
-        case GET_STATE:
+        case MSG.GET_STATE:
           return getState(tabId);
-        case SET_ACTIVE_TAB:
+        case MSG.SET_ACTIVE_TAB:
           return setActiveTab(msg.tabId);
-        case ACTIVE_TAB_QUERY:
-          return { v: 1, type: ACTIVE_TAB_QUERY, tabId: activeTabId };
-        case GET_LAST_TAB:
+        case MSG.ACTIVE_TAB_QUERY:
+          return { v: 1, type: MSG.ACTIVE_TAB_QUERY, tabId: activeTabId };
+        case MSG.GET_LAST_TAB:
           // §4.7.3：SW 重啟後仍能回答；先確保 session 值已還原。
           return loadActiveTab().then(() => ({
             v: 1,
-            type: GET_LAST_TAB,
+            type: MSG.GET_LAST_TAB,
             tabId: activeTabId,
           }));
-        case TEST_KEY:
+        case MSG.GET_RING_LOG:
+          return getRingLog();
+        case MSG.RESYNC:
+          return resync(tabId);
+        case MSG.TEST_KEY:
           return testKey();
         default:
           return false;

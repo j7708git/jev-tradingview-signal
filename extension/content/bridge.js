@@ -38,6 +38,8 @@
       type: data.type,
       bars: data.bars,
       reset: data.reset,
+      // §4.8.1：旁聽計數原樣轉發（缺值為 undefined，SW 端會降級為 0）。
+      counters: data.counters,
       meta: data.meta,
     };
 

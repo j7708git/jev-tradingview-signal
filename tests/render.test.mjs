@@ -21,6 +21,10 @@ import {
   renderLoading,
   renderError,
   renderStatus,
+  renderCounters,
+  renderRingLog,
+  renderRingLogRow,
+  formatClock,
 } from '../extension/sidepanel/render.js';
 
 import {
@@ -260,9 +264,93 @@ test('escapeHtml：標籤與引號被編碼', () => {
   assert.equal(escapeHtml('<b>"x"&\'y\'</b>'), '&lt;b&gt;&quot;x&quot;&amp;&#39;y&#39;&lt;/b&gt;');
 });
 
-test('成本常數：$0.042 / 1M tokens', () => {
+test('成本常數：$0.042 / 1M tokens，且與 protocol.js 單一來源同源', () => {
   assert.equal(COST_PER_INPUT_TOKEN, 0.042 / 1e6);
+  assert.equal(globalThis.COST_USD_PER_MTOK, 0.042);
+  assert.equal(COST_PER_INPUT_TOKEN, globalThis.COST_USD_PER_MTOK / 1e6);
   assert.equal(DIRECTION_CLASS.long, 'dir-long');
+});
+
+test('§4.8.5(a) renderCounters：正常值照實、缺值／非數值一律顯示 0', () => {
+  assert.equal(
+    renderCounters({ dropped: 7, ignoredSeriesFrames: 3 }),
+    'dropped=7 · ignoredSeriesFrames=3',
+  );
+  assert.equal(renderCounters(undefined), 'dropped=0 · ignoredSeriesFrames=0');
+  assert.equal(renderCounters({}), 'dropped=0 · ignoredSeriesFrames=0');
+  assert.equal(
+    renderCounters({ dropped: 'x', ignoredSeriesFrames: NaN }),
+    'dropped=0 · ignoredSeriesFrames=0',
+  );
+});
+
+test('§4.8.5(b) renderRingLog：成功筆與錯誤筆、時戳、空清單降級', () => {
+  const entries = [
+    {
+      at: Date.UTC(2026, 0, 2, 3, 4),
+      symbol: 'BINANCE:BTCUSDT',
+      ok: true,
+      direction: 'long',
+      probs: { long: 0.57, neutral: 0.23, short: 0.2 },
+      up10: 0.55,
+      bull: 2,
+      bear: 1,
+      ms: 123,
+      inputTokens: 17123,
+      outputTokens: 74,
+      costUsd: 0.0007192,
+      model: 'jev-1.13.0',
+    },
+    {
+      at: Date.UTC(2026, 0, 2, 3, 3),
+      symbol: 'BINANCE:BTCUSDT',
+      ok: false,
+      kind: 'auth_401',
+      message: 'bad',
+      ms: 80,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      model: 'jev-latest',
+    },
+  ];
+  const html = renderRingLog(entries);
+  assert.equal((html.match(/class="ring-row"/g) || []).length, 2);
+  // 時間 HH:MM（本地時區，僅驗型式）。
+  assert.match(html, /\d{2}:\d{2}/);
+  assert.match(html, /BINANCE:BTCUSDT/);
+  assert.match(html, /做多/);
+  assert.match(html, /57%/);
+  assert.match(html, /多2\/空1/);
+  assert.match(html, /17123 tokens/);
+  assert.match(html, /\$0\.0007/);
+  assert.match(html, /auth_401/);
+
+  const empty = renderRingLog([]);
+  assert.match(empty, /ring-empty/);
+  assert.match(empty, /—/);
+  assert.doesNotThrow(() => renderRingLog(undefined));
+  assert.doesNotThrow(() => renderRingLog(null));
+});
+
+test('§4.8.5(b) renderRingLog／formatClock 缺值降級不拋錯', () => {
+  assert.equal(formatClock(undefined), '—');
+  assert.equal(formatClock('x'), '—');
+  const html = renderRingLog([{}]);
+  assert.match(html, /ring-row/);
+  assert.match(html, /—/);
+  assert.match(html, /\$0\.0000/);
+  // 單列渲染也不拋錯。
+  assert.doesNotThrow(() => renderRingLogRow({ ok: true }));
+});
+
+test('§4.8.5(b) renderRingLog HTML escape：符號與 kind 不帶出標籤', () => {
+  const html = renderRingLog([
+    { at: 0, symbol: '<img src=x>', ok: false, kind: '<b>x</b>', costUsd: 0 },
+  ]);
+  assert.doesNotMatch(html, /<img/);
+  assert.doesNotMatch(html, /<b>/);
+  assert.match(html, /&lt;img/);
 });
 
 // ─────────────────────────────────────────────────────────────

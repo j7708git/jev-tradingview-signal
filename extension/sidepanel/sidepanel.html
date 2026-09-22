@@ -16,6 +16,15 @@
       <button id="predict-btn" class="primary" type="button" disabled>預測</button>
       <p id="hint" class="hint"></p>
       <section id="result" class="result" aria-live="polite"></section>
+
+      <details id="debug" class="debug">
+        <summary>除錯</summary>
+        <div id="debug-counters" class="debug-counters">dropped=0 · ignoredSeriesFrames=0</div>
+        <div class="debug-actions">
+          <button id="resync-btn" class="ghost" type="button">重同步</button>
+        </div>
+        <div id="ring-log" class="ring-log"><p class="ring-empty">—</p></div>
+      </details>
     </main>
 
     <footer class="footer">

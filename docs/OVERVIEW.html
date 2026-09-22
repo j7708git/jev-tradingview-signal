@@ -58,7 +58,7 @@
   <div class="note">風險提示：Task 01 是全案成敗關鍵（TV 私有 ws 協定為逆推工程）。若取證失敗，備援方案為「直接呼叫 TV 資料端點」，需重新簽核 ARCHITECTURE §4.2。文件：docs/PRD.md・docs/ARCHITECTURE.md・docs/TASK.md。<br><b>2026-09-22 定案要點</b>：TV 同一條 ws 推送多個 series，只有 <code>sds_1</code> 是主圖；輔助序列（<code>INTERNAL:*</code>）必須隔離；series 身分索引會在站內換商品後重新編號（<code>sds_sym_1→sds_sym_3</code>），故<b>只能以符號內容判定主圖，且不可用 URL 推斷商品</b>（§4.2.1）。</div>
 </div>
 <script>
-const DONE = new Set(['01','02','03','04','05','06','07','08','09']);      // 完成後放 '01' …（09 於 2026-09-22 使用者實測通過）
+const DONE = new Set(['01','02','03','04','05','06','07','08','09','10']); // 全數完成（09 於 2026-09-22 使用者實測通過；10 同日 pi 交付）
 const DOING = new Set();                                                    // 進行中的任務 id 放這裡（目前皆已完成）
 const TASKS = [
   ['01','TV ws 協定取證 spike（成敗關鍵）','架構師親執行'],
@@ -70,7 +70,7 @@ const TASKS = [
   ['07','service worker 編排','pi'],
   ['08','Side Panel＋Options','pi'],
   ['09','端到端人工驗收','架構師＋你'],
-  ['10','除錯增強（選做）','pi'],
+  ['10','除錯增強（計數面板＋ring log＋重同步）','pi'],
 ];
 const el = document.getElementById('tasks');
 el.innerHTML = TASKS.map(([id,name,who]) => {

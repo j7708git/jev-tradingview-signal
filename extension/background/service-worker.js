@@ -5,6 +5,9 @@ import { evaluate } from '../lib/jev-client.js';
 import { buildState, QUESTIONS, estimateTokens } from '../lib/state-builder.js';
 import { ChartBuffer } from '../lib/chart-buffer.js';
 
+// §4.6：protocol.js 為雙相容（無 export），符號掛在 globalThis；此處取 MSG 常數。
+const { MSG } = globalThis;
+
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
 const db = createDb({
@@ -27,7 +30,15 @@ const db = createDb({
   evaluate, ChartBuffer, buildState, QUESTIONS, estimateTokens,
 });
 
-const PANEL_CMDS = new Set(['GET_STATE', 'RUN_PREDICTION', 'SET_ACTIVE_TAB', 'TEST_KEY']);
+// §4.8.4：panel 命令一律引用 protocol.js 的 MSG 常數（不得散落字串）。
+const PANEL_CMDS = new Set([
+  MSG.GET_STATE,
+  MSG.RUN_PREDICTION,
+  MSG.SET_ACTIVE_TAB,
+  MSG.TEST_KEY,
+  MSG.GET_RING_LOG,
+  MSG.RESYNC,
+]);
 
 // 是否為本擴充的面板 UI（正式 side panel：sender.tab === undefined；以分頁開啟的
 // sidepanel/options 頁：sender.tab 有值但 sender.url 指向 chrome-extension://.../）。
@@ -51,7 +62,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (panel && msg?.tabId == null && PANEL_CMDS.has(msg?.type)) {
       // §4.7.3：由 sw-core（含 storage.session 還原）取 lastActiveTabId 補 tabId。
       const last = await db.handleRuntimeMessage(
-        { v: 1, type: 'GET_LAST_TAB' },
+        { v: 1, type: MSG.GET_LAST_TAB },
         normalizedSender,
       );
       if (last && last.tabId != null) {

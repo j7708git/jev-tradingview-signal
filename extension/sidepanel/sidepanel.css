@@ -260,6 +260,97 @@ body {
   border-color: var(--accent);
 }
 
+/* ── 除錯區（§4.8.5）─────────────────────────────────── */
+.debug {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+}
+
+.debug > summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.debug-counters {
+  padding: 0 10px 6px;
+  color: var(--text-dim);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
+.debug-actions {
+  padding: 0 10px 8px;
+}
+
+.ghost {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ghost:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.ghost:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ring-log {
+  padding: 0 10px 10px;
+}
+
+.ring-empty {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.ring-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ring-row {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+
+.ring-time {
+  color: var(--text-faint);
+}
+
+.ring-symbol {
+  color: var(--text);
+}
+
+.ring-head {
+  color: var(--accent);
+}
+
+.ring-tail {
+  color: var(--text-faint);
+}
+
 /* ── loading / error ─────────────────────────────────── */
 .loading {
   display: flex;

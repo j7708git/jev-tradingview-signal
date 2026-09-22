@@ -244,6 +244,8 @@
       type: snapshotType,
       reset: wasReset,
       bars: changed,
+      // §4.8.1：隨每則 upsert 捎帶旁聽計數（新增欄位；既有 payload 欄位形狀不變）。
+      counters: { dropped: dropped, ignoredSeriesFrames: ignoredSeriesFrames },
       meta: {
         symbol: symbol,
         resolution: readResolution(),

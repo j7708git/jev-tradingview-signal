@@ -6,12 +6,14 @@
 // 09e-2：門檻單一來源（protocol.js 為雙相容無 export，靠 side-effect 填充 globalThis）。
 import '../lib/protocol.js';
 const PREDICT_MIN_BARS = globalThis.PREDICT_MIN_BARS;
+// §4.8.2：成本單價單一來源（USD / 1M input tokens）。
+const COST_USD_PER_MTOK = globalThis.COST_USD_PER_MTOK;
 
 /** 底部常駐免責固定語（§5.5）。 */
 export const DISCLAIMER = '僅供研究參考，不構成投資建議';
 
-/** 成本換算：$0.042 / 1M input tokens（前端重算，防 last.cost 漂移）。 */
-export const COST_PER_INPUT_TOKEN = 0.042 / 1e6;
+/** 成本換算：$0.042 / 1M input tokens（引用 protocol.js 單一來源，前端重算防 last.cost 漂移）。 */
+export const COST_PER_INPUT_TOKEN = COST_USD_PER_MTOK / 1e6;
 
 /** 方向 → CSS class。 */
 export const DIRECTION_CLASS = {
@@ -265,6 +267,80 @@ export function renderError(kind, message) {
     `<div class="error-msg">${escapeHtml(errorMsg(kind, message))}</div>` +
     `<p class="disclaimer">${DISCLAIMER}</p></div>`
   );
+}
+
+/**
+ * §4.8.5(a)：除錯區 counters 一行：`dropped=X · ignoredSeriesFrames=Y`。
+ * 缺值／非數值一律顯示 0，不得拋錯。
+ * @returns {string} 純文字（呼叫端用 textContent 掛載）
+ */
+export function renderCounters(counters) {
+  const c = counters || {};
+  const droppedRaw = Number(c.dropped);
+  const ignoredRaw = Number(c.ignoredSeriesFrames);
+  const dropped = Number.isFinite(droppedRaw) ? droppedRaw : 0;
+  const ignored = Number.isFinite(ignoredRaw) ? ignoredRaw : 0;
+  return `dropped=${dropped} · ignoredSeriesFrames=${ignored}`;
+}
+
+/** 把 epoch 毫秒格式成 `HH:MM`（本地時區）；無效值回「—」。 */
+export function formatClock(at) {
+  const ms = Number(at);
+  if (!Number.isFinite(ms)) return '—';
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return '—';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * §4.8.5(b)：ring log 單筆一行。
+ * 成功：`HH:MM symbol 方向 機率 · 多X/空Y · ms · tokens · $cost`；
+ * 錯誤：`HH:MM symbol 錯誤 kind · ms · tokens · $cost`。缺值降級「—」，不得拋錯。
+ */
+export function renderRingLogRow(entry) {
+  const e = entry || {};
+  const at = formatClock(e.at);
+  const symbol = e.symbol ? String(e.symbol) : '—';
+  const msRaw = Number(e.ms);
+  const ms = Number.isFinite(msRaw) ? `${msRaw}ms` : '—';
+  const tokensRaw = Number(e.inputTokens);
+  const tokens = Number.isFinite(tokensRaw) ? tokensRaw : 0;
+  const costRaw = Number(e.costUsd);
+  const cost = Number.isFinite(costRaw) ? costRaw : 0;
+  const tail = `${ms} · ${tokens} tokens · $${cost.toFixed(4)}`;
+
+  let head;
+  if (e.ok === true) {
+    const label = Object.prototype.hasOwnProperty.call(DIRECTION_LABEL, e.direction)
+      ? DIRECTION_LABEL[e.direction]
+      : '—';
+    const probs = e.probs || {};
+    const pRaw = Number(probs[e.direction]);
+    const pct = Number.isFinite(pRaw) ? `${Math.round(pRaw * 100)}%` : '—';
+    const bull = e.bull == null ? '—' : String(e.bull);
+    const bear = e.bear == null ? '—' : String(e.bear);
+    head = `${escapeHtml(label)} ${escapeHtml(pct)} · 多${escapeHtml(bull)}/空${escapeHtml(bear)}`;
+  } else {
+    const kind = e.kind == null ? '—' : String(e.kind);
+    head = `錯誤 ${escapeHtml(kind)}`;
+  }
+
+  return (
+    `<li class="ring-row">` +
+    `<span class="ring-time">${escapeHtml(at)}</span> ` +
+    `<span class="ring-symbol">${escapeHtml(symbol)}</span> ` +
+    `<span class="ring-head">${head}</span> ` +
+    `<span class="ring-tail">${escapeHtml(tail)}</span>` +
+    `</li>`
+  );
+}
+
+/** §4.8.5(b)：ring log 清單（新→舊，呼叫端已排序）；空清單降級「—」。 */
+export function renderRingLog(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (list.length === 0) return `<p class="ring-empty">—</p>`;
+  return `<ol class="ring-list">${list.map(renderRingLogRow).join('')}</ol>`;
 }
 
 /**

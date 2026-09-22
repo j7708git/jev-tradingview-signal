@@ -250,6 +250,31 @@ Chrome content script 是 classic script，`export` 語法不可用；同一批 
 
 **真機驗收（架構師親跑，`scripts/e2e-real-chrome.mjs`）**：開 chart 後 30 秒內 SW 至少收到一則 `bars.length >= 50` 的 upsert；`GET_STATE.count >= 50` 且 Side Panel 狀態列顯示根數；`RUN_PREDICTION` 回 `ok:true`。
 
+### 4.8 除錯增強（Task 10；訊息契約擴充，2026-09-22 規格）
+
+**4.8.1 旁聽計數外送（①）**：`inject.js` 既有計數 `dropped`（解析失敗／不消費幀）與 `ignoredSeriesFrames`（§4.2.1 隔離的輔助序列幀）**隨每則 `SNAPSHOT_UPSERT` 捎帶** `counters: {dropped, ignoredSeriesFrames}`（當前累計值；既有 payload 欄位形狀不得變動——verify-inject 為子集斷言，新增欄位安全）。SW 存 `entry.counters`（未收到 upsert 前為 `{dropped:0, ignoredSeriesFrames:0}`）。`GET_STATE` 回應新增 `counters` 欄位（其餘欄位與語意不變）。
+
+**4.8.2 Ring log（②）**：sw-core 記憶體陣列 `ringLog`，上限 20（超出丟最舊），**禁止持久化**（SW 回收即清，符合 PRD Non-Goal）。每次 `doPredict` 結束（含錯誤）push 一筆：
+```jsonc
+{ at, tabId, symbol, resolution, ok,
+  kind?,                                        // 僅錯誤筆：JevError kind＋已 redact 短 message
+  direction?, probs?, up10?, bull?, bear?,      // 成功筆：自 answers 摘要（direction.choice＋probabilities、up_10_bars.noul、bull/bear score）
+  ms, inputTokens, outputTokens, costUsd, model }
+```
+- 新訊息 `GET_RING_LOG`（panel → SW）→ 回 `{ok:true, entries:[...]}`（新→舊）。
+- **redact**：任何欄位不得含 key／header；錯誤筆只記 `kind` 與既有 redact 後短 message。
+- 成本常數收斂：`COST_USD_PER_MTOK = 0.042` 定義於 `lib/protocol.js`（單一來源），sw-core 與 `sidepanel/render.js` 皆改引用（render 的成本列文案與 4 位小數格式不變）；加測試鎖定兩處同源。
+
+**4.8.3 重同步按鈕（③）**：新訊息 `RESYNC`（panel → SW，`{v, tabId?}`；無 tabId 沿用 `lastActiveTabId`）→ sw-core 對該 tab 發 `REQ_SNAPSHOT{full:true}`（§4.7.2 語意：inject 清游標＋全量重送）→ 回 `{ok:true, count}`（重送後該 tab buffer 根數）；無 entry／非 TV tab → `{ok:false}`。
+
+**4.8.4 MSG 常數收斂（Task 07 掛帳一併了結）**：panel 命令類型 `GET_STATE`、`SET_ACTIVE_TAB`、`ACTIVE_TAB_QUERY`、`TEST_KEY`、`GET_LAST_TAB` 與本次新增 `GET_RING_LOG`、`RESYNC` 全部收斂進 `lib/protocol.js` 的 `MSG`（單一來源）；sw-core／SW 殼／sidepanel 一律引用常數，不得再散落字串。`protocol.test.mjs` 的 MSG 鍵集合斷言同步更新。
+
+**4.8.5 Panel UI**：Side Panel 結果區下方折疊 `<details>`「除錯」：
+- (a) counters 一行：`dropped=X · ignoredSeriesFrames=Y`（缺值顯示 0）；
+- (b) ring log 清單（新→舊，每筆一行：`HH:MM symbol 方向/score·機率 · ms · tokens · $cost`；錯誤筆顯示 kind）；
+- (c)「重同步」按鈕 → `RESYNC` → 成功後更新狀態列根數。
+維持無 inline script、無外部資源引用（static-check task08 gate）；缺資料時降級顯示「—」，不得拋錯。
+
 ## 5. 安全規則
 
 1. API key 只存 `chrome.storage.local`（Options 輸入，password input，顯示僅掩碼）；**只允許**在 `lib/jev-client.js` 內讀取並在 fetch 瞬間成 header。原因：單點管控，audit 只 grep 一處。

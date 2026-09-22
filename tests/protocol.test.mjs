@@ -10,6 +10,7 @@ const {
   MSG,
   TV_WS_URL_RE,
   makeMessage,
+  COST_USD_PER_MTOK,
 } = globalThis;
 
 test('PROTOCOL_VERSION 為 1', () => {
@@ -27,7 +28,7 @@ test('BAR_COLUMNS 欄位序為 [time,open,high,low,close,volume]', () => {
   ]);
 });
 
-test('MSG 鍵集合完整且每個值為對應字串', () => {
+test('MSG 鍵集合完整（§4.8.4 收斂後）且每個值為對應字串', () => {
   assert.deepEqual(
     Object.keys(MSG).sort(),
     [
@@ -38,6 +39,13 @@ test('MSG 鍵集合完整且每個值為對應字串', () => {
       'REQ_SNAPSHOT',
       'RUN_PREDICTION',
       'PREDICTION_UPDATED',
+      'GET_STATE',
+      'SET_ACTIVE_TAB',
+      'ACTIVE_TAB_QUERY',
+      'TEST_KEY',
+      'GET_LAST_TAB',
+      'GET_RING_LOG',
+      'RESYNC',
     ].sort(),
   );
 
@@ -49,7 +57,19 @@ test('MSG 鍵集合完整且每個值為對應字串', () => {
     REQ_SNAPSHOT: 'REQ_SNAPSHOT',
     RUN_PREDICTION: 'RUN_PREDICTION',
     PREDICTION_UPDATED: 'PREDICTION_UPDATED',
+    GET_STATE: 'GET_STATE',
+    SET_ACTIVE_TAB: 'SET_ACTIVE_TAB',
+    ACTIVE_TAB_QUERY: 'ACTIVE_TAB_QUERY',
+    TEST_KEY: 'TEST_KEY',
+    GET_LAST_TAB: 'GET_LAST_TAB',
+    GET_RING_LOG: 'GET_RING_LOG',
+    RESYNC: 'RESYNC',
   });
+});
+
+test('§4.8.2 成本單價 COST_USD_PER_MTOK 為 0.042 且為 globalThis 單一來源', () => {
+  assert.equal(COST_USD_PER_MTOK, 0.042);
+  assert.equal(globalThis.COST_USD_PER_MTOK, 0.042);
 });
 
 test('TV_WS_URL_RE 只接受 wss://*.tradingview.com', () => {

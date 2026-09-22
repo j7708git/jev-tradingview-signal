@@ -166,7 +166,8 @@ test('RUN_PREDICTION happy：state/questions 結構、cost、broadcast 順序 lo
   const entry = db.entryFor(1);
   assert.equal(entry.last.status, 'done');
   assert.deepEqual(entry.last.answers, { direction: { choice: 'long' } });
-  assert.equal(entry.last.cost, (1234 * 0.042) / 1e6);
+  // §4.8.2：成本單價來自 protocol.js 單一來源。
+  assert.equal(entry.last.cost, (1234 * globalThis.COST_USD_PER_MTOK) / 1e6);
   assert.ok(typeof entry.last.ms === 'number');
   assert.ok(entry.last.state.bars.length === 300);
 
@@ -314,15 +315,15 @@ test('併發鎖：進行中第二次 RUN_PREDICTION 回 {ok:false,error:"busy"}'
   assert.equal(r2.ok, true);
 });
 
-test('GET_STATE 無 entry → {status:"idle",count:0}', () => {
+test('GET_STATE 無 entry → {status:"idle",count:0,counters:{0,0}}', () => {
   const db = createDb(makeHarness().deps);
   assert.deepEqual(
     db.handleRuntimeMessage({ v: 1, type: 'GET_STATE', tabId: 999 }, panelSender()),
-    { status: 'idle', count: 0 },
+    { status: 'idle', count: 0, counters: { dropped: 0, ignoredSeriesFrames: 0 } },
   );
   assert.deepEqual(
     db.handleRuntimeMessage({ v: 1, type: 'GET_STATE' }, panelSender()),
-    { status: 'idle', count: 0 },
+    { status: 'idle', count: 0, counters: { dropped: 0, ignoredSeriesFrames: 0 } },
   );
 });
 
@@ -660,4 +661,286 @@ test('§4.7.3 session 讀取失敗降級為記憶體值，不拋錯', async () =
     false,
   );
   assert.equal(db.entryFor(9).buffer.count, 3);
+});
+
+// ─────────────────────────────────────────────────────────────
+// Task 10 §4.8：counter 捎帶 / ring log / RESYNC
+// ─────────────────────────────────────────────────────────────
+
+/** 帶 counters 的 upsert（模擬 inject §4.8.1 捎帶）。 */
+function upsertWithCounters(bs, meta, counters, reset) {
+  return { ...upsert(bs, meta, reset), counters };
+}
+
+test('§4.8.1 counters 捎帶：upsert 帶 counters → entry.counters 更新、GET_STATE 帶著回', () => {
+  const db = createDb(makeHarness().deps);
+
+  // 未收到 upsert 前：預設 {0,0}。
+  assert.deepEqual(
+    db.handleRuntimeMessage({ v: 1, type: 'GET_STATE' }, panelSender()),
+    { status: 'idle', count: 0, counters: { dropped: 0, ignoredSeriesFrames: 0 } },
+  );
+
+  db.handleRuntimeMessage(
+    upsertWithCounters(
+      bars(1_000_000, 60),
+      { symbol: 'S', resolution: '1' },
+      { dropped: 7, ignoredSeriesFrames: 3 },
+    ),
+    tvSender(1),
+  );
+  assert.deepEqual(db.entryFor(1).counters, { dropped: 7, ignoredSeriesFrames: 3 });
+
+  const summary = db.handleRuntimeMessage(
+    { v: 1, type: 'GET_STATE', tabId: 1 },
+    panelSender(),
+  );
+  assert.deepEqual(summary.counters, { dropped: 7, ignoredSeriesFrames: 3 });
+  // 其餘欄位語意不變。
+  assert.equal(summary.count, 60);
+  assert.equal(summary.symbol, 'S');
+});
+
+test('§4.8.1 counters 缺值／非數值降級為 0，不拋錯、不覆蓋整包', () => {
+  const db = createDb(makeHarness().deps);
+  db.handleRuntimeMessage(
+    upsertWithCounters(bars(1_000_000, 5), { symbol: 'S' }, { dropped: 'x' }),
+    tvSender(1),
+  );
+  assert.deepEqual(db.entryFor(1).counters, { dropped: 0, ignoredSeriesFrames: 0 });
+
+  // 完全不帶 counters 的舊格式 upsert：entry 仍存在且 counters 預設 0。
+  db.handleRuntimeMessage(upsert(bars(2_000_000, 5), { symbol: 'S' }), tvSender(2));
+  assert.deepEqual(db.entryFor(2).counters, { dropped: 0, ignoredSeriesFrames: 0 });
+});
+
+test('§4.8.2 ring log 成功筆：answers 摘要、costUsd、model、新→舊', async () => {
+  const h = makeHarness({
+    evaluate: async () => ({
+      model: 'jev-1.13.0',
+      answers: {
+        direction: { choice: 'long', probabilities: { long: 0.6, neutral: 0.3, short: 0.1 } },
+        up_10_bars: { noul: 0.55 },
+        bull_trend: { score: 2 },
+        bear_trend: { score: 1 },
+      },
+      usage: { input_tokens: 1234, output_tokens: 7 },
+    }),
+  });
+  const db = createDb(h.deps);
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'BINANCE:BTCUSDT', resolution: '15' }),
+    tvSender(1),
+  );
+  const res = await db.handleRuntimeMessage(run(1), panelSender());
+  assert.equal(res.ok, true);
+
+  const log = db.handleRuntimeMessage(
+    { v: 1, type: globalThis.MSG.GET_RING_LOG },
+    panelSender(),
+  );
+  assert.equal(log.ok, true);
+  assert.equal(log.entries.length, 1);
+  const e = log.entries[0];
+  assert.equal(e.ok, true);
+  assert.equal(e.tabId, 1);
+  assert.equal(e.symbol, 'BINANCE:BTCUSDT');
+  assert.equal(e.resolution, '15');
+  assert.equal(e.direction, 'long');
+  assert.deepEqual(e.probs, { long: 0.6, neutral: 0.3, short: 0.1 });
+  assert.equal(e.up10, 0.55);
+  assert.equal(e.bull, 2);
+  assert.equal(e.bear, 1);
+  assert.equal(e.inputTokens, 1234);
+  assert.equal(e.outputTokens, 7);
+  // §4.8.2：costUsd = inputTokens × COST_USD_PER_MTOK / 1e6。
+  assert.equal(e.costUsd, (1234 * globalThis.COST_USD_PER_MTOK) / 1e6);
+  assert.equal(e.model, 'jev-1.13.0');
+  assert.ok(typeof e.at === 'number');
+  assert.ok(typeof e.ms === 'number' && e.ms >= 0);
+});
+
+test('§4.8.2 ring log：上限 20 丟最舊且新→舊排序', async () => {
+  let calls = 0;
+  const h = makeHarness({
+    evaluate: async () => {
+      calls += 1;
+      return { model: 'm', answers: {}, usage: { input_tokens: calls, output_tokens: 0 } };
+    },
+  });
+  const db = createDb(h.deps);
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'S', resolution: '1' }),
+    tvSender(1),
+  );
+  for (let i = 0; i < 22; i += 1) {
+    await db.handleRuntimeMessage(run(1), panelSender());
+  }
+
+  const log = db.handleRuntimeMessage(
+    { v: 1, type: globalThis.MSG.GET_RING_LOG },
+    panelSender(),
+  );
+  assert.equal(log.entries.length, 20, '上限 20');
+  // 新→舊：第一筆是最後一次預測（calls=22），最後一筆是保留的最舊（calls=3；1、2 已丟）。
+  assert.equal(log.entries[0].inputTokens, 22);
+  assert.equal(log.entries[19].inputTokens, 3);
+  for (let i = 1; i < log.entries.length; i += 1) {
+    assert.ok(log.entries[i - 1].at >= log.entries[i].at, 'at 需非遞增（新→舊）');
+  }
+});
+
+test('§4.8.2 ring log 錯誤筆：含 kind＋已 redact 短 message，無 key／header 片段', async () => {
+  const h = makeHarness({
+    evaluate: async () => {
+      throw new JevError('auth_401', `bad key ${KEY}`);
+    },
+  });
+  const db = createDb(h.deps);
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'S', resolution: '1' }),
+    tvSender(1),
+  );
+  await db.handleRuntimeMessage(run(1), panelSender());
+
+  const log = db.handleRuntimeMessage(
+    { v: 1, type: globalThis.MSG.GET_RING_LOG },
+    panelSender(),
+  );
+  assert.equal(log.entries.length, 1);
+  const e = log.entries[0];
+  assert.equal(e.ok, false);
+  assert.equal(e.kind, 'auth_401');
+  assert.ok(String(e.message).includes('[redacted]'));
+  assert.equal(String(e.message).includes(KEY), false);
+  assert.equal(JSON.stringify(e).includes(KEY), false);
+  assert.ok(String(e.message).length <= 121, '短 message（含省略號上限）');
+  assert.equal(e.costUsd, 0);
+  assert.equal(e.inputTokens, 0);
+});
+
+test('§4.8.2 ring log：資料不足拒絕也留一筆（ok:false, kind=insufficient_data）', async () => {
+  const h = makeHarness();
+  const db = createDb(h.deps);
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 20), { symbol: 'S', resolution: '1' }),
+    tvSender(1),
+  );
+  const res = await db.handleRuntimeMessage(run(1), panelSender());
+  assert.equal(res.ok, false);
+
+  const log = db.handleRuntimeMessage(
+    { v: 1, type: globalThis.MSG.GET_RING_LOG },
+    panelSender(),
+  );
+  assert.equal(log.entries.length, 1);
+  assert.equal(log.entries[0].ok, false);
+  assert.equal(log.entries[0].kind, 'insufficient_data');
+});
+
+test('§4.8.3 RESYNC：對該 tab 發 REQ_SNAPSHOT{full:true} 並回 {ok:true,count}', async () => {
+  const h = makeHarness({ tabUrls: { 1: TV_URL }, waitMs: 5 });
+  const db = createDb(h.deps);
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'S', resolution: '1' }),
+    tvSender(1),
+  );
+
+  h.tabMessages.length = 0; // 只看 RESYNC 這一則
+  const res = await db.handleRuntimeMessage(
+    { v: 1, type: globalThis.MSG.RESYNC, tabId: 1 },
+    panelSender(),
+  );
+  assert.deepEqual(res, { ok: true, count: 60 });
+
+  const reqs = h.tabMessages.filter((m) => m.msg.type === globalThis.MSG.REQ_SNAPSHOT);
+  assert.equal(reqs.length, 1);
+  assert.equal(reqs[0].tabId, 1);
+  assert.equal(reqs[0].msg.v, 1);
+  assert.equal(reqs[0].msg.full, true, '§4.7.2 語意：full:true 全量重送');
+});
+
+test('§4.8.3 RESYNC：無 entry／非 TV tab（含 tab 已導離）→ {ok:false}', async () => {
+  const h = makeHarness({
+    tabUrls: { 2: 'https://example.com/chart/x' },
+    waitMs: 5,
+  });
+  const db = createDb(h.deps);
+
+  // 無 entry。
+  assert.deepEqual(
+    await db.handleRuntimeMessage(
+      { v: 1, type: globalThis.MSG.RESYNC, tabId: 42 },
+      panelSender(),
+    ),
+    { ok: false },
+  );
+
+  // 有 entry，但該 tab 現址已非 tradingview.com/chart（sender 當時是 TV，如今導離）。
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'S', resolution: '1' }),
+    tvSender(2),
+  );
+  assert.deepEqual(
+    await db.handleRuntimeMessage(
+      { v: 1, type: globalThis.MSG.RESYNC, tabId: 2 },
+      panelSender(),
+    ),
+    { ok: false },
+  );
+});
+
+test('§4.8.3 RESYNC 無 tabId 時沿用 lastActiveTabId；content script 來源被拒', async () => {
+  const h = makeHarness({ tabUrls: { 5: TV_URL }, waitMs: 5 });
+  const db = createDb(h.deps);
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'S', resolution: '1' }),
+    tvSender(5),
+  );
+  h.tabMessages.length = 0;
+
+  // 不帶 tabId → 沿用 activeTabId=5。
+  const res = await db.handleRuntimeMessage(
+    { v: 1, type: globalThis.MSG.RESYNC },
+    panelSender(),
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.count, 60);
+
+  // content script 來源（sender.tab 有值）不得觸發 RESYNC。
+  assert.equal(
+    db.handleRuntimeMessage({ v: 1, type: globalThis.MSG.RESYNC, tabId: 5 }, tvSender(5)),
+    false,
+  );
+});
+
+test('§4.8.2 ring log 不持久化：storage 只可能寫 lastActiveTabId，絕不寫 ring log', async () => {
+  const writes = [];
+  const h = makeHarness({
+    session: {
+      get: async () => ({}),
+      set: async (obj) => {
+        writes.push(obj);
+      },
+    },
+  });
+  const db = createDb(h.deps);
+  db.handleRuntimeMessage(
+    upsert(bars(1_000_000, 60), { symbol: 'S', resolution: '1' }),
+    tvSender(1),
+  );
+  await db.handleRuntimeMessage(run(1), panelSender());
+
+  // 確實有 ring log 一筆。
+  const log = db.handleRuntimeMessage(
+    { v: 1, type: globalThis.MSG.GET_RING_LOG },
+    panelSender(),
+  );
+  assert.equal(log.entries.length, 1);
+
+  // 持久化只可能是 lastActiveTabId；ring log 鍵不得出現在任何 storage 寫入。
+  const keys = writes.flatMap((w) => Object.keys(w));
+  assert.ok(keys.length > 0, '應至少寫過 activeTabId');
+  assert.deepEqual([...new Set(keys)], ['lastActiveTabId']);
+  assert.ok(writes.every((w) => !/ring/i.test(JSON.stringify(w))));
 });

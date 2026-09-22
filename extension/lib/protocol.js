@@ -8,6 +8,10 @@ const PROTOCOL_VERSION = (globalThis.PROTOCOL_VERSION = 1);
 // 不得再有第二份數字。低於此值一律拒絕預測（連 API 都不呼叫）。
 const PREDICT_MIN_BARS = (globalThis.PREDICT_MIN_BARS = 50);
 
+// §4.8.2：成本單價（USD / 1M input tokens），單一來源。sw-core 的成本計算與
+// sidepanel/render.js 的成本列一律引用此值，禁止再有第二份 0.042 字面值。
+const COST_USD_PER_MTOK = (globalThis.COST_USD_PER_MTOK = 0.042);
+
 // 09f／§4.2.1：主圖 series key（單一來源）。`sds_2+` 為輔助序列，其 bar/reset/meta
 // 一律不得汙染主圖。inject 由此 globalThis 取值，不得散落字面值。
 const MAIN_SERIES_KEY = (globalThis.MAIN_SERIES_KEY = 'sds_1');
@@ -31,6 +35,14 @@ const MSG = (globalThis.MSG = {
   REQ_SNAPSHOT: 'REQ_SNAPSHOT',
   RUN_PREDICTION: 'RUN_PREDICTION',
   PREDICTION_UPDATED: 'PREDICTION_UPDATED',
+  // §4.8.4：panel 命令類型全數收斂於此（單一來源；sw-core／SW 殼／sidepanel 一律引用）。
+  GET_STATE: 'GET_STATE',
+  SET_ACTIVE_TAB: 'SET_ACTIVE_TAB',
+  ACTIVE_TAB_QUERY: 'ACTIVE_TAB_QUERY',
+  TEST_KEY: 'TEST_KEY',
+  GET_LAST_TAB: 'GET_LAST_TAB',
+  GET_RING_LOG: 'GET_RING_LOG',
+  RESYNC: 'RESYNC',
 });
 
 // 實測承載圖表資料的 ws 是 wss://prodata.tradingview.com/socket.io/websocket

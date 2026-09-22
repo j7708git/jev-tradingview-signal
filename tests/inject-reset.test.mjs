@@ -339,3 +339,75 @@ test('09g INTERNAL:* 的 symbol_resolved 不得改 symbol、不得清缓衝', ()
   assert.equal(em.meta.total, 5, 'INTERNAL 不得清缓衝');
   assert.equal(em.reset, false);
 });
+
+// ─────────────────────────────────────────────────────────────
+// Task 10 §4.8.1：SNAPSHOT_UPSERT 捎帶旁聽計數
+// ─────────────────────────────────────────────────────────────
+
+test('§4.8.1 upsert 攜帶 counters：非主圖 series 幀遞增 ignoredSeriesFrames、解析不了的壞幀遞增 dropped', () => {
+  const h = setup();
+
+  // 首則（主圖 3 根正常資料）：counters 應為 {0,0}。
+  h.ws.dispatch(frame(tsu(makeBars(1_000_000, 3))));
+  h.sandbox.__JEV_FORCE_EMIT();
+  let em = h.last();
+  // 註：em 來自 vm 沙箱（跨 realm），故逐欄斷言而非 deepStrictEqual。
+  assert.equal(em.counters.dropped, 0);
+  assert.equal(em.counters.ignoredSeriesFrames, 0);
+
+  // 三種非主圖 series 幀：sds_2 reset、sds_2 bars、INTERNAL symbol → 各 +1。
+  h.ws.dispatch(frame(seriesLoading('sds_2')));
+  h.ws.dispatch(frame(tsu(makeBars(2_000_000, 5), 'sds_2')));
+  h.ws.dispatch(frame(symbolResolved('INTERNAL:SEASONALS', 'sds_sym_2')));
+  h.sandbox.__JEV_FORCE_EMIT();
+  em = h.last();
+  assert.equal(em.counters.ignoredSeriesFrames, 3, '非主圖幀各計一次');
+  assert.equal(em.counters.dropped, 0, '非主圖幀不得計入 dropped');
+
+  // 解析不了的幀（classify → null）與欄位不足的 bar → dropped 各 +1。
+  h.ws.dispatch(frame({ m: 'qsd', p: [1, 2, 3] }));
+  h.ws.dispatch(
+    frame({
+      m: 'timescale_update',
+      p: ['cs_TEST', { sds_1: { s: [{ i: 0, v: [1, 2, 3] }] } }],
+    }),
+  );
+  h.sandbox.__JEV_FORCE_EMIT();
+  em = h.last();
+  assert.equal(em.counters.dropped, 2, 'qsd 幀＋欄位不足 bar 各計一次');
+  assert.equal(em.counters.ignoredSeriesFrames, 3, 'ignored 不得因 dropped 改變');
+  assert.equal(em.meta.dropped, em.counters.dropped, '與既有 meta.dropped 同步');
+});
+
+test('§4.8.1 counters 為累計值且既有 payload 欄位形狀不變', () => {
+  const h = setup();
+  h.ws.dispatch(frame(tsu(makeBars(1_000_000, 3))));
+  h.sandbox.__JEV_FORCE_EMIT();
+
+  // 壞幀 +1 dropped，再加一根主圖尾根增量。
+  h.ws.dispatch(frame({ m: 'qsd', p: [] }));
+  h.ws.dispatch(frame(tsu(makeBars(1_000_180, 1))));
+  h.sandbox.__JEV_FORCE_EMIT();
+  const em = h.last();
+
+  // counters 為累計值（第二則仍帶著第一則的狀態，非重置）。
+  assert.equal(em.counters.dropped, 1);
+  assert.equal(em.counters.ignoredSeriesFrames, 0);
+
+  // 既有欄位形狀不變：counters 只是新增欄位。
+  assert.equal(em.v, 1);
+  assert.equal(em.type, 'SNAPSHOT_UPSERT');
+  assert.equal(typeof em.reset, 'boolean');
+  assert.ok(Array.isArray(em.bars));
+  assert.ok(em.bars.every((b) => Array.isArray(b) && b.length === 6));
+  assert.deepEqual(Object.keys(em.meta).sort(), [
+    'dropped',
+    'resolution',
+    'symbol',
+    'total',
+    'ts',
+  ]);
+  assert.equal(typeof em.meta.total, 'number');
+  assert.equal(typeof em.meta.dropped, 'number');
+  assert.equal(typeof em.meta.ts, 'number');
+});

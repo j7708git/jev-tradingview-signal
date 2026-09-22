@@ -10,8 +10,12 @@ import {
   renderResult,
   renderLoading,
   renderError,
+  renderCounters,
+  renderRingLog,
 } from './render.js';
 
+// §4.8.4：panel 命令一律引用 protocol.js 的 MSG 常數（不得散落字串）。
+const MSG = globalThis.MSG;
 const POLL_MS = 2000;
 const PREDICT_MIN_BARS = globalThis.PREDICT_MIN_BARS;
 const NEED_MORE_HINT =
@@ -21,6 +25,10 @@ const statusEl = document.getElementById('status-line');
 const predictBtn = document.getElementById('predict-btn');
 const hintEl = document.getElementById('hint');
 const resultEl = document.getElementById('result');
+// §4.8.5：除錯區元素（缺元素時全部降級為 no-op，不得拋錯）。
+const debugCountersEl = document.getElementById('debug-counters');
+const ringLogEl = document.getElementById('ring-log');
+const resyncBtn = document.getElementById('resync-btn');
 
 /** 目前已知的圖表 tab id（用來只認自己 tab 的 PREDICTION_UPDATED）。 */
 let myTabId = null;
@@ -102,25 +110,35 @@ function applyState(state) {
   if (!state || typeof state !== 'object') return;
   currentState = state;
   statusEl.innerHTML = renderStatus(state);
+  // §4.8.5(a)：counters 一行（缺值顯示 0）。
+  if (debugCountersEl) debugCountersEl.textContent = renderCounters(state.counters);
   syncControls();
+}
+
+/** §4.8.5(b)：取回 ring log 並渲染（新→舊；失敗降級不拋錯）。 */
+async function refreshRingLog() {
+  if (!ringLogEl) return;
+  const ring = await send({ v: 1, type: MSG.GET_RING_LOG });
+  if (ring && ring.ok) ringLogEl.innerHTML = renderRingLog(ring.entries);
 }
 
 async function refresh() {
   // 讓「只認自己 tab」保持最新：SW 的 lastActiveTabId 隨 SNAPSHOT_UPSERT 更新。
-  const tab = await send({ v: 1, type: 'GET_LAST_TAB' });
+  const tab = await send({ v: 1, type: MSG.GET_LAST_TAB });
   if (tab && tab.tabId != null) myTabId = tab.tabId;
-  const state = await send({ v: 1, type: 'GET_STATE' });
+  const state = await send({ v: 1, type: MSG.GET_STATE });
   applyState(state);
+  await refreshRingLog();
 }
 
 function isOwnUpdate(message) {
-  if (!message || message.v !== 1 || message.type !== 'PREDICTION_UPDATED') return false;
+  if (!message || message.v !== 1 || message.type !== MSG.PREDICTION_UPDATED) return false;
   if (myTabId == null || message.tabId == null) return true;
   return message.tabId === myTabId;
 }
 
 async function showDoneFromState() {
-  const state = await send({ v: 1, type: 'GET_STATE' });
+  const state = await send({ v: 1, type: MSG.GET_STATE });
   applyState(state);
   const last = state && state.last;
   if (!last) return;
@@ -153,10 +171,21 @@ function bindCopyButtons() {
   }
 }
 
+async function onResync() {
+  if (resyncBtn) resyncBtn.disabled = true;
+  try {
+    const res = await send({ v: 1, type: MSG.RESYNC });
+    // §4.8.3：成功後更新狀態列根數（直接刷新整塊狀態）。
+    if (res && res.ok) await refresh();
+  } finally {
+    if (resyncBtn) resyncBtn.disabled = false;
+  }
+}
+
 async function onPredict() {
   if (predicting) return;
   startLoading();
-  const response = await send({ v: 1, type: 'RUN_PREDICTION' });
+  const response = await send({ v: 1, type: MSG.RUN_PREDICTION });
   // busy 不是 error kind：保持 disabled，等 PREDICTION_UPDATED 廣播收尾。
   if (response && response.error === 'busy') return;
   if (response && response.ok && response.result) {
@@ -197,6 +226,12 @@ chrome.runtime.onMessage.addListener((message) => {
 predictBtn.addEventListener('click', () => {
   void onPredict();
 });
+
+if (resyncBtn) {
+  resyncBtn.addEventListener('click', () => {
+    void onResync();
+  });
+}
 
 // 開啟：先讀 model，再立即 GET_STATE，之後每 2s 輪詢。
 readModel();

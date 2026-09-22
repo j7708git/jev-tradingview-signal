@@ -4,7 +4,7 @@
 
 > **公開發佈（2026-09-22）**：<https://github.com/j7708git/jev-tradingview-signal>（public，MIT）。`docs/.prompt-task*.txt`（派工單）與 `scratch/`（診斷工具）列在 `.gitignore`，不隨公開發佈；本機絕對路徑已去識別化。
 派工對象預設 **pi**（`pi -p`），驗收命令一律在專案根的 git-bash 可執行。
-> 測試標準指令為 `npm test`（＝ bare `node --test` 自動探索，**130/130**；其中 1 則來自 gitignore 的 `scratch/parse-frames-test.mjs`，`tests/` 本身 129 則）。注意 Node 24 下 `node --test tests/` 目錄參數會報「找不到模組」，勿再使用。
+> 測試標準指令為 `npm test`（＝ bare `node --test` 自動探索，Task 10 後 **147/147**；其中 1 則來自 gitignore 的 `scratch/parse-frames-test.mjs`，`tests/` 本身 146 則）。注意 Node 24 下 `node --test tests/` 目錄參數會報「找不到模組」，勿再使用。
 
 > ⚠ 本專案與一般 web 專案的差異：Task 01 是**取證 spike**，由架構師親自在真實 Chrome＋TradingView 執行（需要登陸狀態的瀏覽器），pi 無法代替。pi 的派工從 Task 02 開始。
 
@@ -157,8 +157,15 @@
     - 復原：換回真金鑰 → `ok:true`（1446ms、17557 tokens、$0.0007），DOM 回正常結果渲染——錯誤狀態未卡死面板。
   - 清單七項 ①–⑦ 至此**全數真機驗證完畢**，Task 09 無殘留待辦。
 
-### [ ] Task 10:（選做，可取捨）除錯增強
-- droppedFrames／各 series 計數進 debug 面板；ring log 最近 20 次預測；「重同步」按鈕（觸發 REQ_SNAPSHOT）。
+### [x] Task 10: 除錯增強（完整版：①計數面板＋②ring log＋③重同步鈕）✅ 2026-09-22（pi）
+- 規格：`docs/ARCHITECTURE.md` §4.8（4.8.1–4.8.5）。派工單：`docs/.prompt-task10.txt`。
+- ①inject 旁聽計數（dropped／ignoredSeriesFrames）隨 SNAPSHOT_UPSERT 捎帶 → GET_STATE 帶 counters → Panel 折疊除錯區；②sw-core 記憶體 ring log 最近 20 次預測摘要（**不持久化**）＋新訊息 GET_RING_LOG；③Panel「重同步」鈕 → RESYNC → REQ_SNAPSHOT{full:true}。
+- 附帶（Task 07 掛帳）：panel 命令 MSG 常數收斂進 protocol.js＋成本常數 COST_USD_PER_MTOK 單一來源。
+- 驗收：`npm test` 全綠（零回歸＋新增用例）；`node scripts/static-check.mjs` 四 gate＋`node scripts/verify-inject.mjs` verdict PASS（19/19 不得回歸）。
+- [x] 完成紀錄：**2026-09-22 pi 兩輪執行（主任務＋核准偏差的 inject-reset 斷言補強），架構師親驗全綠**：`npm test` **147/147**（130 基準＋17 新，fail 0）、static-check **task02/06/07/08 四 gate 全 ALL PASS**（架構師逐一親跑）、verify-inject **19/19 verdict PASS**、git 無越界（scripts/ 未被碰、docs/ 僅架構師改動）。
+  - 交付：①counters 捎帶（SNAPSHOT_UPSERT→entry.counters→GET_STATE）＋Panel 折疊除錯區（dropped／ignoredSeriesFrames）；②ringLog 記憶體 20 筆（不持久化、doPredict 結束必 push 含錯誤筆、redact 無 key）＋GET_RING_LOG；③RESYNC→REQ_SNAPSHOT{full:true}＋「重同步」鈕。附帶：panel 7 型命令收斂進 protocol.MSG（14 鍵，Task 07 掛帳了結）＋COST_USD_PER_MTOK=0.042 單一來源。
+  - 核准偏差：工單所列 sidepanel/sidepanel.js 實檔為 sidepanel/app.js（就地修改）；tests/inject-reset.test.mjs 追加 2 則 counters 斷言（第二輪核准，Target Files 追加）；vm 跨 realm 逐欄 assert.equal 取代 deepStrictEqual（prototype 誤判）。
+  - 驗證注意：`static-check.mjs` 需帶 `taskNN` 參數逐一跑，**不帶參數只跑 task02**。
 
 ---
 
