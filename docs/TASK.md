@@ -196,6 +196,12 @@
 - [x] **多指標真機 e2e 達成**：TV 未登入掛指標一律彈「Join for free」牆（證據 `scratch/ct-after.png`）→ 以 session cookie 同機轉移（值全程不進對話/暫存檔用後即刪）登入已存在 TV 帳號，layout 帶回 9 指標＋手動點入 EMA＝**10 studies 全鏈實測**：RUN ok、`studiesTrimmed=18`、27,474 tok、$0.0012、映射區 10 輸入框、結果區摘要全綠（harness 12/13，唯一 FAIL＝自動掛列 best-effort 項，已由 studies=10 取代）。
 - [x] **e2e 撞出真缺陷（多指標 RUN）→ Task 14fix 修復並復測成功**：多指標 payload 被 API 打回 400/422＝`{"detail":{"error_type":"max_tokens_exceeded"}}`（實測 pass=29,669 input_tokens/37.2KB、fail≈33K/40.9KB → 上限約 32K）。已派 **Task 14fix**（最小修補）：`fitStateToBudget` 輸入預算守門（studies 值尾端裁窗＋`studiesTrimmed` 標記）、`entry.last` 帶 bodySnippet、bad_request 文案友善化。規格讓步（API 物理上限）：studies 值窗 ≤ bars 窗，超預算時自動尾端裁剪（rows 自帶 time、對齊自證）；bars 不動。
 - 環境坑（重要，已入 skill `tradingview-ui-automation`）：①重複使用的測試 profile 可能載入**舊版 SW 快取**（GET_STATE 連 Task 10 的 counters 都沒有＝pre-Task-10 碼），解法＝全新 `--user-data-dir` 重啟；②TV DOM 自動化：React 受控輸入須 CDP `Input.insertText` 真鍵、虛擬清單只渲染可見窗、點左導覽會清搜尋字、未登入「搜尋」只回社群結果。
+
+### [x] Task 15: 指標映射刪除（排除）鈕（F11）（2026-09-22 完成）
+- pi 實作（npm test **210/210**（+13）、static-check ×4 ALL PASS、verify-inject PASS、邊界乾淨恰 8 檔）：映射列「✕」＋「已排除（N）」muted 小區（復原鈕）、`chrome.storage.local.studyExclude` 持久化（studyId[]、壞型別→[]）、`buildStudies opts.exclude` 於預算裁剪**之前**過濾（被排除者不吃預算）、`studiesMeta` 仍全量（UI 需名稱渲染已排除區）。
+- 真機 e2e（`scratch/diag-f11-exclude.mjs`）**8/8**：每列 ✕（6/6）→ 點 ✕ 主列表 −1＋「已排除（1）」＋storage 含目標 id → **重載持久化** → RUN ok（$0.0012）**payload 不含被排除者**（5 筆保留）→ 復原回列表＋storage 清。
+- 自訂名稱（studyNameMap）不受刪除/復原影響（pi 單測覆蓋）。
+
 - Panel 指標名稱映射 UI（F10）：動態輸入框、預設＝自動偵測名稱、失焦即存、持久化；＋payload/結果區顯示附帶指標；真機掛指標圖 e2e；成本複驗 ≤$0.005/次。
 
 ---

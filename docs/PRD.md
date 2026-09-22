@@ -34,6 +34,9 @@ Denny 在 Chrome 使用 TradingView 看圖。本專案做一個個人用 Chrome 
 | F9 | （二期）指標串接：自動偵測圖表使用中的 study，數值序列隨 `state.studies` 送出，與 `bars` 設定同窗口、同時間軸對齊；無值根為 null | 掛 N 個指標的圖按預測，payload.studies 含 N 筆（名稱/參數可辨識，不可辨識時降級原始 id＋TV 顯示名稱）；未掛指標時 `studies:[]` 且既有流程零回歸 |
 | F10 | （二期）指標名稱映射 UI：Panel 動態列出偵測到的指標各一個輸入框（預設＝自動偵測名稱），可自行修改、失焦即存 `chrome.storage.local` 持久化 | 指標新增/移除時輸入框跟著出現/收起；重載後自訂名稱仍在；送 Jev 的 `name` 為自訂值（`rawName` 保留自動名稱） |
 
+### F11：指標映射刪除（排除）鈕（2026-09-22）
+映射列增「✕」刪除鈕：刪除＝該指標**不進 payload**（`state.studies` 不含它）；該列移入「已排除（N）」小區（muted 樣式），每項附「復原」鈕可還原（**自訂名稱保留**）。排除狀態**持久化**（`chrome.storage.local.studyExclude`＝studyId 陣列）。全部排除＝`studies:[]`（同未掛指標語意）。已排除但已從圖表移除的 id 不顯示於已排除區、殘留無害。
+
 ## 4. Non-Goals（明確不做）
 
 - 不自動下單、不連任何券商／交易所 API。
