@@ -28,14 +28,16 @@ try {
   const r = await evaluate({ apiKey: key, state, questions: QUESTIONS });
   const ms = Date.now() - t0;
   const a = r.answers ?? {};
-  const ids = ['direction', 'up_10_bars', 'trend_strength'];
+  const ids = ['direction', 'up_10_bars', 'bull_trend', 'bear_trend'];
   const missing = ids.filter(i => !(i in a));
   console.log(JSON.stringify({ model: r.model, answers: a, usage: r.usage, ms }, null, 2));
   const cost = ((r.usage?.input_tokens ?? 0) * 0.042 + (r.usage?.output_tokens ?? 0) * 0) / 1e6;
   console.log(`cost=$${cost.toFixed(5)}  judge=${r.model}`);
-  console.log(missing.length === 0 && a.direction?.choice && typeof a.direction?.confidence === 'number'
-    ? `verdict: PASS (${ms}ms)` : `verdict: FAIL — 缺答案欄 ${missing.join(',') || 'shape 不對'}`);
-  process.exit(missing.length === 0 ? 0 : 1);
+  const shapeOk = !!a.direction?.choice && typeof a.direction?.confidence === 'number'
+      && typeof a.bull_trend?.score === 'number' && typeof a.bear_trend?.score === 'number';
+    console.log(missing.length === 0 && shapeOk
+      ? `verdict: PASS (${ms}ms)` : `verdict: FAIL — 缺答案欄 ${missing.join(',') || 'shape 不對'}`);
+    process.exit(missing.length === 0 && shapeOk ? 0 : 1);
 } catch (e) {
   const kind = e instanceof JevError ? e.kind : 'unexpected';
   const msg = String(e?.message || e).replaceAll(key, '[redacted]');
