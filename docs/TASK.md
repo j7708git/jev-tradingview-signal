@@ -190,7 +190,11 @@
   - 交付：inject 包 ws.send 只讀觀察消費 create_study（pineId＋in_*/具名參數，text 加密 blob 丟棄）＋du study 逐根 upsert（time 為 key、負 sentinel i 忽略、st 空自動排除、symbol 完整重置連動清序列）；新訊息 STUDIES_UPSERT（meta+patches+gone）；sw-core entry.studies（每 study 3000 根）；state-builder `buildStudies`（bars 窗口逐位對齊、缺值 null、nameMap 覆寫→Pine 縮寫＋首參數 fallback 鏈、columns v1..vn、無指標 `[]`）。
   - fixture 實測：`ws-studies-real.txt` 7 個 create_study 全解析、BarSet（yl9zbk）無 st 值自動排除、redact 斷言 text 零殘留。
 
-### [-] Task 14: Panel 呈現 studies＋真機 e2e 驗收🔄 2026-09-22 派工 pi（UI 部分）
+### [-] Task 14: Panel 呈現 studies＋真機 e2e 驗收（實作＋自動化驗證完成；多指標真機驗收待使用者——TRY-IT §6）
+- [x] Panel 映射 UI（F10）＋studies 呈現：pi 完成（`db7606f`，npm test **189/189**、static-check ×4 ALL PASS、verify-inject PASS、邊界乾淨恰 7 檔）。
+- [x] 真機 e2e（架構師 harness `scratch/diag-f9-studies-e2e.mjs`，全新 profile）：**單 study 全鏈各項綠**——GET_STATE.studiesMeta（inject→SW 收到真實 ws study 幀）、state.studies 與 bars 窗口對齊 300 根、name/columns（多值 v1..vn）、映射區輸入框預設自動名、失焦即存＋空值刪鍵還原 storage、RUN 真 API ok、結果區「本次附帶指標」摘要行、**成本 $0.0013/次**（30.5K tokens）≤ $0.005 ✓。
+- [ ] **多指標（≥2 studies）真機驗收待使用者**（TRY-IT §6）：TV「未登入」對任何指標掛載動作一律彈「Join for free」帳號牆**阻擋掛載**（證據 `scratch/ct-after.png`＋`tv-dlg.png`：連點內建列都被擋、圖例不增），無帳號的自動化測試瀏覽器掛不上第 2 個指標。**非本擴充缺陷**（fixture 7-study 全鏈單測 189/189 全綠）。
+- 環境坑（重要，已入 skill `tradingview-ui-automation`）：①重複使用的測試 profile 可能載入**舊版 SW 快取**（GET_STATE 連 Task 10 的 counters 都沒有＝pre-Task-10 碼），解法＝全新 `--user-data-dir` 重啟；②TV DOM 自動化：React 受控輸入須 CDP `Input.insertText` 真鍵、虛擬清單只渲染可見窗、點左導覽會清搜尋字、未登入「搜尋」只回社群結果。
 - Panel 指標名稱映射 UI（F10）：動態輸入框、預設＝自動偵測名稱、失焦即存、持久化；＋payload/結果區顯示附帶指標；真機掛指標圖 e2e；成本複驗 ≤$0.005/次。
 
 ---
