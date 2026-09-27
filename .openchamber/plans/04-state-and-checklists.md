@@ -13,7 +13,7 @@ Phase 0–4 / Task 01–15 **全數完成並通過真機 e2e**（詳 `docs/TASK.
 ## 每次改完必跑（綠才算完成）
 
 ```bash
-npm test                                  # 期望 209/209
+npm test                                  # 期望 209/209（主 checkout 保留 scratch/ 時為 210）
 node scripts/static-check.mjs task02      # 四個 gate 各自帶參數跑，不帶參數只跑 task02
 node scripts/static-check.mjs task06
 node scripts/static-check.mjs task07

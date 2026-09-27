@@ -4,7 +4,7 @@
 
 > **公開發佈（2026-09-22）**：<https://github.com/j7708git/jev-tradingview-signal>（public，MIT）。`docs/.prompt-task*.txt`（派工單）與 `scratch/`（診斷工具）列在 `.gitignore`，不隨公開發佈；本機絕對路徑已去識別化。
 派工對象預設 **pi**（`pi -p`），驗收命令一律在專案根的 git-bash 可執行。
-> 測試標準指令為 `npm test`（＝ bare `node --test` 自動探索）。**現況 209/209 全綠**（2026-09-28 實跑；全在 `tests/`。各任務完成紀錄中的數字為「當時」值——Task 15 記 210，其中 1 則來自 gitignore 的 `scratch/parse-frames-test.mjs`，該檔不在 repo 故現為 209）。注意 Node 24 下 `node --test tests/` 目錄參數會報「找不到模組」，勿再使用。
+> 測試標準指令為 `npm test`（＝ bare `node --test` 自動探索）。**現況 209/209 全綠**（2026-09-28 實跑；全在 `tests/`。各任務完成紀錄中的數字為「當時」值——Task 15 記 210，其中 1 則來自 gitignore 的 `scratch/parse-frames-test.mjs`；該檔不在 repo，故乾淨 clone 為 209、本機主 checkout 因保留 `scratch/` 為 210）。注意 Node 24 下 `node --test tests/` 目錄參數會報「找不到模組」，勿再使用。
 
 > ⚠ 本專案與一般 web 專案的差異：Task 01 是**取證 spike**，由架構師親自在真實 Chrome＋TradingView 執行（需要登陸狀態的瀏覽器），pi 無法代替。pi 的派工從 Task 02 開始。
 

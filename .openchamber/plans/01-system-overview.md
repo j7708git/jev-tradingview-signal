@@ -52,7 +52,7 @@ TradingView 分頁
 ## 現況（2026-09-28）
 
 - Task 01–15 全數完成，四期（風險消減／純資料層／接線／二期指標）皆已驗收，含真機 e2e。
-- `npm test` **209/209**；static-check task02/06/07/08 四 gate ALL PASS；verify-inject 19/19 PASS。
+- `npm test` **209/209**（主 checkout 保留 gitignored 的 `scratch/` 時為 210）；static-check task02/06/07/08 四 gate ALL PASS；verify-inject 19/19 PASS。
 - 成本：無指標 ≈$0.0007／次；掛 10 指標 ≈$0.0012／次（標準 ≤$0.005）。單次約 1 秒。
 - repo：`https://github.com/j7708git/jev-tradingview-signal`（public, MIT）。
 
