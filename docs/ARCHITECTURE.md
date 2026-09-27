@@ -57,27 +57,40 @@ jev-tradingview-signal/
 │   ├── content/
 │   │   ├── inject.js           # 注入 world:MAIN：包裝 WebSocket、旁聽 mem 協定
 │   │   └── bridge.js           # isolated：main↔SW 訊息橋＋重連/心跳
-│   ├── sidepanel/
-│   │   ├── sidepanel.html / sidepanel.css / sidepanel.js
-│   ├── options/
-│   │   ├── options.html / options.css / options.js
+│   ├── sidepanel/              # Side Panel（無 inline script；static-check task08 gate）
+│   │   ├── sidepanel.html / sidepanel.css
+│   │   ├── app.js              # 狀態機、輪詢、指標映射 UI（含排除鈕 F11）
+│   │   └── render.js           # 純渲染：徽章／機率條／映射列／ring log
+│   ├── options/                # 設定頁：key / model / bars / 特徵開關
+│   │   ├── options.html / options.css
+│   │   └── app.js / render.js
 │   └── lib/                    # 純函式，ESM，SW/測試共用（不得 import chrome.*）
-│       ├── protocol.js         # 訊息 type 常數＋bar 欄位序＋version
+│       ├── protocol.js         # 訊息 type 常數(MSG)＋bar 欄位序＋門檻/成本常數＋version
+│       ├── ws-parse.js         # mem 幀解析＋create_study／du-study 解析（無 export，§4.6）
 │       ├── chart-buffer.js     # 增量 upsert、滚动上限、snapshot()
 │       ├── features.js         # MA/RSI/動量/高低距（純數學）
-│       ├── state-builder.js    # snapshot+features → systemone state
+│       ├── state-builder.js    # snapshot+features+studies → systemone state（含預算守門）
+│       ├── sw-core.js          # SW 可測核（零 chrome.*）：registry、predict、ring log
 │       └── jev-client.js       # 唯一對外出口：fetch、退避重試、逾時、錯誤正規化
-├── scripts/
-│   ├── verify-lib.mjs          # node --test 入口包装（供派工驗收命令統一）
-│   ├── live-jev.mjs            # 讀 argv 的 environment 取鑰匙，對 fixture 打真 API
-│   └── diag-ws.mjs             # （第二期）ws 協定取證輔助
-├── tests/
-│   ├── fixtures/               # bars-300.json、expected-features.json、jev-response-*.json
-│   ├── chart-buffer.test.mjs
-│   ├── features.test.mjs
-│   ├── state-builder.test.mjs
-│   └── jev-client.test.mjs     # 以注入的 fake fetch 測重試/逾時/401/422 路徑
-├── docs/                       # 本四件套＋派工 prompt 檔
+├── scripts/                    # 驗收／診斷（架構師專用；pi 不得改）
+│   ├── static-check.mjs        # 靜態 gate：node scripts/static-check.mjs task02|06|07|08
+│   ├── verify-inject.mjs       # inject.js 行為驗收臺（真實幀餵入，19/19）
+│   ├── parse-evidence.mjs      # 離線重播 Task 01 證據檔
+│   ├── live-jev.mjs            # 讀環境變數 JEV_API_KEY，對 fixture 打真 API
+│   ├── e2e-real-chrome.mjs     # 真機 e2e（Playwright Chromium；branded Chrome 已無 --load-extension）
+│   ├── e2e-error-paths.mjs     # 真機錯誤路徑（錯 key／斷網）
+│   └── ui-preview-server.mjs / ui-static-export.mjs  # Panel/Options 視覺預覽
+├── tests/                      # 現行 209 則（npm test ＝ bare node --test）
+│   ├── fixtures/               # bars-*-300、expected-state、jev-response-*、ws-evidence-*、ws-*-real.txt
+│   ├── chart-buffer.test.mjs / features.test.mjs / protocol.test.mjs
+│   ├── ws-parse.test.mjs       # 含 ws-studies-real fixture 重播＋redact 斷言
+│   ├── state-builder.test.mjs  # 含 buildStudies／fitStateToBudget
+│   ├── jev-client.test.mjs     # 以注入的 fake fetch 測重試/逾時/401/422 路徑
+│   ├── sw-core.test.mjs        # registry／predict／ring log／RESYNC／排除過濾
+│   ├── content-scripts.test.mjs / inject-reset.test.mjs
+│   └── render.test.mjs         # Panel 渲染（兩列趨勢、映射列、排除鈕）
+├── docs/                       # 本四件套＋OVERVIEW＋派工 prompt 檔（prompt 檔 gitignore）
+├── package.json                # 僅 scripts，零 dependencies
 └── README.md                   # 載入步驟＋鑰匙設定＋按鍵說明
 ```
 
@@ -90,7 +103,8 @@ jev-tradingview-signal/
 | window.postMessage | inject → bridge | `JEV_HELLO` | `{v, hooks:true}` |
 | window.postMessage | bridge → inject | `JEV_PING` | `{v}` |
 | window.postMessage | inject → bridge | `JEV_WS_DATA` | `{v, url, dir:'recv', frames:[...]}`（見 4.2） |
-| runtime | bridge → SW | `SNAPSHOT_UPSERT` | `{v, bars: number[][], seriesKey?, meta}` |
+| runtime | bridge → SW | `SNAPSHOT_UPSERT` | `{v, bars: number[][], seriesKey?, meta, counters?}`（`counters` 見 §4.8.1） |
+| runtime | bridge → SW | `STUDIES_UPSERT` | `{v, meta: {studyId:{scriptName?,pineId?,params?}}, patches: {studyId:[time, ...values][]}, gone: studyId[]}`（§4.2.2） |
 | runtime | SW → bridge | `REQ_SNAPSHOT` | `{v}`（SW 主動要求補傳/重同步） |
 | runtime | panel/options → SW | `RUN_PREDICTION` | `{v, tabId}` → 回 `{ok, result?, error?}` |
 | runtime | SW → panel | `PREDICTION_UPDATED` | `{v, tabId, state:'idle|loading|done|error', payloadRef}` |
@@ -107,12 +121,12 @@ jev-tradingview-signal/
   - `symbol_resolved` → `p[1]` 是 **series 身分**（實測 `sds_sym_1`＝主圖、`sds_sym_2`＝輔助序列、`ss_1`＝圖表 study 符號），`p[2].full_name` 才是符號。**只有主序列（`sds_sym_1` / `ss_1`）才更新 `meta.symbol`**；其餘（如 `sds_sym_2` → `INTERNAL:SEASONALS`）一律忽略。
   - `series_loading` 且 `p[1]` 以 `sds` 開頭 → 重置**該 series 自己的**游標；**只有 `sds_1` 的 reset 才作用於主圖 ChartBuffer**（`sds_2+` 的 reset 不得動主圖緩衝）；
   - `timescale_update` → 取 `p[1][key]`（key 匹配 `/^sds_/`，實測為 `sds_1`）之 `s[]`：每條 `{i, v}`，**`v=[time,open,high,low,close,volume]`（time 為 epoch 秒）**，整段 upsert（實測一次 300 根，i=0..299）；同型但 `p[1]==={}` 者（未來刻度排程）丟棄；
-  - `du` → 只取 `p[1]` 中 `/^sds_/` key 的 `s[]`（實測恆為尾根 `{i:299,v:[...]}`），upsert 覆寫；`st` 結尾的 study 鍵第二期前不消費；
+  - `du` → 只取 `p[1]` 中 `/^sds_/` key 的 `s[]`（實測恆為尾根 `{i:299,v:[...]}`），upsert 覆寫；同一幀內非 `/^sds_/` 的 study 鍵（`st`）**自 Task 13 起另行解析**（規則見 §4.2.2）；
   - 其餘（`qsd`、`*_completed`…）丟棄並計數（`droppedFrames` 進除錯面板）。
 - **timeframe 不在下行協定中**：`meta.resolution` 讀 `location.search` 的 `interval`（TV 於 SPA 內同步改寫 URL），並與 tsu 相鄰 time 差交叉校驗，不一致以 URL 為準＋warn 計數。
 - 第一期只消費「圖表自己已經請求的資料」：不主動發送任何自製訂閱幀。協定解析集中於 `lib/ws-parse.js` 的 `parseMemFrames`（名字沿用，回傳 `{seriesKey, bars, meta?, control:'load|complete'}`）；解析不了的幀靜默丟棄並計數。
 - 節流：每 2 秒最多一次 `SNAPSHOT_UPSERT`，只送**增量** bar（time > 上次已送最大 time，或尾根數值有變）。
-- 已知逃生門（預留介面，不实裝）：`seriesKey` 結構保留，供第二期主動發訂閱幀拉更深歷史或抓 study 值。
+- 已知逃生門（預留介面，不实裝）：`seriesKey` 結構保留，供未來主動發訂閱幀拉更深歷史（study 數值已於二期以旁聽取得，不再需要主動訂閱）。
 
 #### 4.2.1 多 series：只有 `sds_1` 是主圖（Task 09f；2026-09-21 真機取證定案）
 
@@ -152,12 +166,14 @@ jev-tradingview-signal/
    對應要求：主圖 seriesKey 仍是 `sds_1`（不變），但**符號身分索引會跳號**；且**站內換商品時 `location.href` 的 `?symbol=` 不會更新**（真機實測仍顯示舊商品）→ **嚴禁以 URL 推斷當前商品**，唯一可信來源是主圖的 `symbol_resolved`。
 7. 換商品後的正確結果：`meta.symbol` 立即變為新商品、主圖緩衝為新商品的 `300 + 尾根`（**不含**舊商品任何 bar）。
 
-#### 4.2.2 指標（study）消費（二期；Task 12 取證後回寫定案，本節先立契約骨架）
+#### 4.2.2 指標（study）消費（Task 12 取證已定案 2026-09-22；Task 13 實作、Task 14 呈現、Task 15 排除鈕）
 
-- 來源：`du` 的非 sds 鍵 `<studyId>:{st:[...]}`＋`study_loading`／`study_completed`（身分線索）——WS-NOTES §2 既有觀測。**只消費當前圖表使用中的 study**；不主動發任何幀（逃生門仍不實裝）。
-- 身分（雙層；**Task 12 已定案，詳 WS-NOTES §7**）：① 自動映射自**上行 `create_study`**（inject 包 `send` 時只讀記錄、絕不改動）：`pineId`（`%1`→空白）＋ `in_*`／具名參數排成「名稱(參數)」；② **使用者覆寫**（F10）：Panel 動態輸入框（預設＝①結果），自訂值存 `chrome.storage.local.studyNameMap`（持久化），**主鍵 `studyId`**（layout 持久）、失效 fallback `pineId|in_*` 簽章；`state.studies[].name` 取覆寫值、`rawName` 保留自動名稱。**禁止寫死指標清單**。
-- 對齊：每 study 數值序列與 `bars` 設定同窗口（預設 300）、依 time 對齊主圖 bars；warmup 無值根照實為 `null`。
-- ~~未知數~~ **Task 12 已全數定案（WS-NOTES §7，2026-09-22）**：①映射在上行 `create_study` 明文（pineId＋in_*）；② `st` 為完整逐根序列＋尾根增量，`v=[epoch秒,...1–4值]`，**以 `v[0]` 時間對齊 bars**；③ Pine 正文加密但身分/參數明文，自訂 Pine 可辨識；④ `studyId` 由 client 生成存 layout、跨 reload 穩定（TV 內部輔助除外）。
+- 來源：**上行 `create_study`**（身分／參數）＋**下行 `du` 的非 sds 鍵 `<studyId>:{st:[...]}`**（逐根數值）；`study_loading`／`study_completed` 僅作型別線索。**只消費當前圖表使用中的 study**；不主動發任何幀（逃生門仍不實裝）。取證細節見 WS-NOTES §7。
+- 身分（雙層）：① 自動映射自**上行 `create_study`**（inject 包 `send` 時只讀記錄、絕不改動）：Pine 型取 `pineId`（`%1`→空白）＋ `in_*`；直給型取具名參數（`Volume@tv-basicstudies-277` → `{length, col_prev_close}`）。自動名＝`縮寫(首參數)`（`Arnaud Legoux Moving Average` ＋ `in_0=25` → `ALMA(25)`）。② **使用者覆寫**（F10）：Panel 動態輸入框（預設＝①結果），自訂值存 `chrome.storage.local.studyNameMap`（持久化），**主鍵 `studyId`**（layout 持久、跨 reload 穩定＝WS-NOTES §7 未知數④）、失效 fallback `pineId|in_*` 簽章；`state.studies[].name` 取覆寫值、`rawName` 保留自動名稱。**禁止寫死指標清單**。
+- 對齊：每 study 數值序列與 `bars` 設定同窗口（預設 300）、**以 `st[i].v[0]` 的 epoch 秒**對齊主圖 bars；warmup 無值根照實為 `null`。每 study 1–4 值，欄位通用命名 `columns:['time','v1'..'vn']`（plot 語意不可知）。
+- 排除（F11／Task 15）：`chrome.storage.local.studyExclude`（studyId 陣列）內者**不進 payload**；過濾於 `buildStudies` 內生效且**早於** §4.4.1 的預算裁剪（被排除者不吃預算）。`GET_STATE.studiesMeta` 仍回全量（Panel 需渲染「已排除（N）」區）。
+- 排除邊界：`st` 恆空者（TV 內部／非時序型，如 VRVP、BarSet）**自動不納入**（非寫死清單）；`i` 欄位忽略（歷史批為負 sentinel）。`options.text`（加密 Pine 正文）永不進入任何輸出（redact）。
+- 取證四未知數已於 Task 12 全數定案（WS-NOTES §7）：①映射在上行 `create_study` 明文（pineId＋`in_*`）；② `st` 為完整逐根序列＋尾根增量，`v=[epoch秒,...1–4值]`，以 `v[0]` 時間對齊 bars；③ Pine 正文加密但身分／參數明文，自訂 Pine 可辨識；④ `studyId` 由 client 生成存 layout、跨 reload 穩定（TV 內部輔助除外）。
 
 ### 4.3 ChartBuffer（lib/chart-buffer.js）
 
@@ -213,6 +229,14 @@ jev-tradingview-signal/
 > 面板相容：若舊回應仍含 `trend_strength`，照舊渲染「趨勢強度」一列；新回應渲染兩列「多頭趨勢強度／空頭趨勢強度」。
 
 回應（已查證 docs.typesafe.ai/api）：`{ model, answers:{direction:{choice,probabilities,confidence}, up_10_bars:{noul}, bull_trend:{score,legend,probabilities,confidence}, bear_trend:{score,legend,probabilities,confidence}}, usage:{input_tokens,output_tokens} }`。
+
+#### 4.4.1 輸入預算守門（Task 14fix；規格讓步自 API 物理上限）
+
+`/v1/systemone` 對輸入設上限，超限回 400/422 `{"detail":{"error_type":"max_tokens_exceeded"}}`。真機實測（2026-09-22，9 指標 × 300 窗）：pass＝29,669 input_tokens／37.2KB，fail≈33K／40.9KB → **上限約 32K tokens**。
+
+- `lib/state-builder.js` 的 `INPUT_BUDGET_CHARS = 29000`（以 JSON 字元數保守計，約 23K tokens，留安全邊際）＋ `fitStateToBudget(state)`：超預算時**只裁 `studies[].values` 的尾端窗**並標記 `state.studiesTrimmed = K`；`bars` 不動。裁剪過後仍超限才回報錯誤。
+- 規格讓步：`studies` 值窗 **≤ bars 窗**（rows 自帶 time，對齊自證）。被 F11 排除的 study 在裁剪**之前**已濾除，不吃預算。
+- 觀察值（10 指標）：`studiesTrimmed=18`、27,474 tokens、$0.0012 —— 仍遠低於 PRD 的 ≤$0.005 標準。
 
 錯誤正規化（client 一律拋統一 `JevError{kind}`）：`no_key`(未設定) / `auth_401` / `bad_request_422` / `rate_429`（退避重試 500ms→1s→2s，3 次後 `rate_exhausted`）/ `overloaded_529`（同 429）/ `timeout` / `offline` / `offhost`(回應非 2xx 其他)。429/529 之外的非 2xx **不重試**。原因：Jev 是判斷服務不是資料服務，重複打非限流錯誤沒有意義。
 

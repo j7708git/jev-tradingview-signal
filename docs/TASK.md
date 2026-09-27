@@ -4,7 +4,7 @@
 
 > **公開發佈（2026-09-22）**：<https://github.com/j7708git/jev-tradingview-signal>（public，MIT）。`docs/.prompt-task*.txt`（派工單）與 `scratch/`（診斷工具）列在 `.gitignore`，不隨公開發佈；本機絕對路徑已去識別化。
 派工對象預設 **pi**（`pi -p`），驗收命令一律在專案根的 git-bash 可執行。
-> 測試標準指令為 `npm test`（＝ bare `node --test` 自動探索，Task 10 後 **147/147**；其中 1 則來自 gitignore 的 `scratch/parse-frames-test.mjs`，`tests/` 本身 146 則）。注意 Node 24 下 `node --test tests/` 目錄參數會報「找不到模組」，勿再使用。
+> 測試標準指令為 `npm test`（＝ bare `node --test` 自動探索）。**現況 209/209 全綠**（2026-09-28 實跑；全在 `tests/`。各任務完成紀錄中的數字為「當時」值——Task 15 記 210，其中 1 則來自 gitignore 的 `scratch/parse-frames-test.mjs`，該檔不在 repo 故現為 209）。注意 Node 24 下 `node --test tests/` 目錄參數會報「找不到模組」，勿再使用。
 
 > ⚠ 本專案與一般 web 專案的差異：Task 01 是**取證 spike**，由架構師親自在真實 Chrome＋TradingView 執行（需要登陸狀態的瀏覽器），pi 無法代替。pi 的派工從 Task 02 開始。
 
@@ -201,15 +201,14 @@
 - pi 實作（npm test **210/210**（+13）、static-check ×4 ALL PASS、verify-inject PASS、邊界乾淨恰 8 檔）：映射列「✕」＋「已排除（N）」muted 小區（復原鈕）、`chrome.storage.local.studyExclude` 持久化（studyId[]、壞型別→[]）、`buildStudies opts.exclude` 於預算裁剪**之前**過濾（被排除者不吃預算）、`studiesMeta` 仍全量（UI 需名稱渲染已排除區）。
 - 真機 e2e（`scratch/diag-f11-exclude.mjs`）**8/8**：每列 ✕（6/6）→ 點 ✕ 主列表 −1＋「已排除（1）」＋storage 含目標 id → **重載持久化** → RUN ok（$0.0012）**payload 不含被排除者**（5 筆保留）→ 復原回列表＋storage 清。
 - 自訂名稱（studyNameMap）不受刪除/復原影響（pi 單測覆蓋）。
-
-- Panel 指標名稱映射 UI（F10）：動態輸入框、預設＝自動偵測名稱、失焦即存、持久化；＋payload/結果區顯示附帶指標；真機掛指標圖 e2e；成本複驗 ≤$0.005/次。
+- 規格回寫：`docs/PRD.md` F11 補「排除早於預算裁剪」；`docs/ARCHITECTURE.md` §4.2.2 補排除規則、§4.4.1 立輸入預算守門（Task 14fix）、§4.1 補 `STUDIES_UPSERT` 列。
 
 ---
 
 ## 依賴圖（串行順序）
 
 ```
-01 → 02 → 03 → 04 → 05 → 06 → 07 → 08 → 09 → 10 → 11 → 12 → 13 → 14
+01 → 02 → 03 → 04 → 05 → 06 → 07 → 08 → 09 → 10 → 11 → 12 → 13 → 14 → 15
 ```
 
 任何任務驗收失敗：根因編號寫進本檔該任務的「完成紀錄」，發最小修補 prompt（pi 用 `pi -c` 續接），不整模組重寫。
