@@ -1,6 +1,6 @@
 # jev-tradingview-signal（面板名稱：Jev Signal）
 
-在 TradingView 圖表上手動按一次，把自己正在看的圖表資料（**300 根 K 棒 OHLCV ＋本地派生特徵**）送給 [TypeSafe](https://console.typesafe.ai) 的官方 **Jev** 模型做判斷，結果顯示在 Chrome 側邊面板：方向（做多／做空／觀望）、未來 10 根上漲機率、多頭趨勢強度、空頭趨勢強度。
+在 TradingView 圖表上手動按一次，把自己正在看的圖表資料（**300 根 K 棒 OHLCV ＋本地派生特徵 ＋圖表上使用中的指標數值**）送給 [TypeSafe](https://console.typesafe.ai) 的官方 **Jev** 模型做判斷，結果顯示在 Chrome 側邊面板：方向（做多／做空／觀望）、未來 10 根上漲機率、多頭趨勢強度、空頭趨勢強度。
 
 > 個人研究工具：**不會自動下單、不碰券商 API、不保存交易紀錄、不做回測**。輸出僅供研究參考，不構成投資建議。
 
@@ -10,6 +10,7 @@
 - **只讀不干擾**：以 `world: MAIN` 旁聽 TradingView 自家 WebSocket 的**已載入**資料，**不改送、不主動訂閱**任何幀
 - **金鑰只存在瀏覽器**：TypeSafe API key 只寫入 `chrome.storage.local`，只由 service worker 外呼，不進頁面 context、不落 console
 - **不經過任何仲介伺服器**：擴充直接呼叫官方 `POST https://api.typesafe.ai/v1/systemone`
+- **指標零設定**：自動偵測圖上掛的指標（布林通道、ALMA、CMF…）並附上名稱／參數／數值；可在面板改名或按「✕」排除（設定存在本機）
 
 ## 安裝（載入未封裝）
 
@@ -25,13 +26,16 @@
 
 開圖後 K 棒會自動累積；站內切換商品時面板會跟著更新（緩衝重置為新商品）。
 
+面板的「**指標映射**」區會列出偵測到的每個指標：可直接改名（失焦即存）、清空則還原自動名、或按「✕」移入「已排除」不送給模型。
+
 ## 實測數據
 
 | 項目 | 實測值 |
 |---|---|
-| 單次預測成本 | ≈ **$0.0007**（約 NT$0.02） |
+| 單次預測成本（無指標） | ≈ **$0.0007**（約 NT$0.02） |
+| 單次預測成本（掛 10 個指標） | ≈ **$0.0012** |
 | 單次往返時間 | ≈ 1.0 秒 |
-| 單次 token | ≈ 17,500 tokens（送 300 根 K 棒＋派生特徵） |
+| 單次 token | ≈ 17,500（無指標）／≈ 27,500（10 指標） |
 | 模型 | `jev-latest`（實裝判別版本 `jev-1.13.0`） |
 
 ## 專案結構
@@ -42,19 +46,19 @@ extension/
   content/inject.js    world:MAIN，包裝 WebSocket 旁聽 TV 私有協定（不改送）
   content/bridge.js    isolated world 橋接（content → service worker）
   background/          service worker（訊息路由、狀態、預測呼叫）
-  lib/                 協定、解析、緩衝、特徵、state 組裝、Jev client（可單獨在 Node 測）
+  lib/                 協定、解析、緩衝、特徵、state 組裝、SW 可測核、Jev client（可單獨在 Node 測）
   sidepanel/ options/  側邊面板與設定頁
 docs/                  PRD、ARCHITECTURE、TASK、協定取證筆記、試用步驟
 scripts/               靜態檢查 gate、驗收／診斷腳本
-tests/                 node --test（130 項）＋真機抓幀 fixture
+tests/                 node --test（209 項）＋真機抓幀 fixture
 ```
 
 ## 開發與測試
 
 ```bash
-node --test                     # 單元測試（130/130）
-node scripts/static-check.mjs task02   # 靜態 gate（task02/06/07/08）
-node scripts/verify-inject.mjs         # ws 包裝器行為驗證
+npm test                        # 單元測試（209/209）
+node scripts/static-check.mjs task02   # 靜態 gate（task02/06/07/08 各自帶參數跑）
+node scripts/verify-inject.mjs         # ws 包裝器行為驗證（19/19）
 ```
 
 真機端到端驗收（架構師自用；需 Playwright 自帶的 Chromium，因為 branded Chrome 153 起已移除 `--load-extension`）：
@@ -67,6 +71,8 @@ node scripts/e2e-real-chrome.mjs 9333   # 載入擴充→真 TradingView→真 T
 
 - 依賴 TradingView **私有** WebSocket 協定（本專案以真機抓幀取證定案，見 `docs/WS-NOTES.md`）；TV 改版可能導致取數失效
 - 只使用「圖表自己已載入」的 K 棒（通常 300 根），不主動拉更深歷史
+- 指標只送「名稱／參數／數值」，**不解析 Pine 語意**（多圖指標的欄位是通用 `v1..vn`）；非時序型指標（如 VRVP）不會送出
+- API 對輸入有上限（實測約 32K tokens）：指標過多時自動裁短指標值窗（`studiesTrimmed`），K 棒不動
 - 決策完全由 Jev 模型輸出，本專案不做任何本地買賣建議
 
 ## 授權

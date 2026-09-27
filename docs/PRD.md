@@ -35,7 +35,7 @@ Denny 在 Chrome 使用 TradingView 看圖。本專案做一個個人用 Chrome 
 | F10 | （二期）指標名稱映射 UI：Panel 動態列出偵測到的指標各一個輸入框（預設＝自動偵測名稱），可自行修改、失焦即存 `chrome.storage.local` 持久化 | 指標新增/移除時輸入框跟著出現/收起；重載後自訂名稱仍在；送 Jev 的 `name` 為自訂值（`rawName` 保留自動名稱） |
 
 ### F11：指標映射刪除（排除）鈕（2026-09-22）
-映射列增「✕」刪除鈕：刪除＝該指標**不進 payload**（`state.studies` 不含它）；該列移入「已排除（N）」小區（muted 樣式），每項附「復原」鈕可還原（**自訂名稱保留**）。排除狀態**持久化**（`chrome.storage.local.studyExclude`＝studyId 陣列）。全部排除＝`studies:[]`（同未掛指標語意）。已排除但已從圖表移除的 id 不顯示於已排除區、殘留無害。
+映射列增「✕」刪除鈕：刪除＝該指標**不進 payload**（`state.studies` 不含它）；該列移入「已排除（N）」小區（muted 樣式），每項附「復原」鈕可還原（**自訂名稱保留**）。排除狀態**持久化**（`chrome.storage.local.studyExclude`＝studyId 陣列）。全部排除＝`studies:[]`（同未掛指標語意）。已排除但已從圖表移除的 id 不顯示於已排除區、殘留無害。排除於 `buildStudies` 內生效且**早於輸入預算裁剪**（被排除者不吃預算）。
 
 ## 4. Non-Goals（明確不做）
 
@@ -51,7 +51,7 @@ Denny 在 Chrome 使用 TradingView 看圖。本專案做一個個人用 Chrome 
 
 1. 在真實 TradingView 圖表（任一格內符號＋任一常用週期）按「預測」，3 秒內 Side Panel 出現帶機率的判斷結果。
 2. 全程不打開 DevTools：抓數、送 prediction、顯示結果一條線可用；出錯時 Panel 訊息能定位環節（取數失敗／API 拒絕）。
-3. 一次預測成本 ≤ $0.005（依 usage.input_tokens 換算 $0.042/MTok 驗證）。
+3. 一次預測成本 ≤ $0.005（依 usage.input_tokens 換算 $0.042/MTok 驗證）。實測：無指標 ≈$0.0007；掛 10 個指標 ≈$0.0012。指標過多撞 API 輸入上限（實測約 32K tokens）時自動裁短指標值窗（`studiesTrimmed`），K 棒不動。
 4. 程式碼中不存在任何明文 API key；`git grep` 驗證無 key 字串進 repo。
 
 ## 6. 決策記錄（使用者已確認／採建議預設）
@@ -68,3 +68,4 @@ Denny 在 Chrome 使用 TradingView 看圖。本專案做一個個人用 Chrome 
 | Panel 設定入口 | 「⚙ 設定」按鈕＋no_key CTA（openOptionsPage） | 使用者明確要求（2026-09-22） |
 | 指標串接 | 自動偵測圖表使用中的指標（不寫死清單）；數值序列與 `bars` 設定同窗口對齊 | 使用者明確要求（2026-09-22） |
 | 指標名稱映射 | Panel 動態輸入框（預設自動偵測名稱、可改、失焦即存、持久化）；送 Jev 用自訂名稱、rawName 保留 | 使用者明確要求（2026-09-22） |
+| 指標排除 | 映射列「✕」＝該指標不進 payload，移入「已排除（N）」可復原（自訂名稱保留）；狀態持久化於 `chrome.storage.local.studyExclude` | 使用者明確要求（2026-09-22） |
